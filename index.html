@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>호야의 K-POP 댄스 파티</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="saekdong"></div>
+
+  <main id="app">
+
+    <!-- ========== 1. 시작 화면 ========== -->
+    <section id="screen-title" class="screen active">
+      <div class="title-art">
+        <svg class="taegeuk spin" viewBox="-50 -50 100 100" aria-hidden="true">
+          <circle r="48" fill="#cd2e3a"/>
+          <path d="M-48 0 A48 48 0 0 0 48 0 A24 24 0 0 0 0 0 A24 24 0 0 1 -48 0Z" fill="#0047a0"/>
+        </svg>
+        <div class="mascot-big">🐯</div>
+      </div>
+      <h1>호야의 <span class="kpop">K-POP</span> 댄스 파티</h1>
+      <p class="subtitle">우리나라 곳곳을 여행하며 신나게 춤춰요!</p>
+      <button class="btn btn-primary btn-huge" id="btn-start">시작하기 ▶</button>
+      <p class="note">📷 카메라 화면은 이 컴퓨터 안에서만 쓰이고, 어디에도 저장되거나 보내지지 않아요.</p>
+    </section>
+
+    <!-- ========== 2. 노래 고르기 ========== -->
+    <section id="screen-select" class="screen">
+      <h2 class="select-title"><span class="mascot">🐯</span> 어떤 노래로 춤출까요?</h2>
+      <div class="song-grid" id="song-grid"></div>
+
+      <div class="settings">
+        <div class="setting">
+          <span class="setting-label">난이도</span>
+          <div class="segmented" id="difficulty">
+            <button data-value="easy">쉬움</button>
+            <button data-value="normal">보통</button>
+            <button data-value="hard">어려움</button>
+          </div>
+        </div>
+        <label class="setting check"><input type="checkbox" id="opt-flip"> 내 영상 좌우 뒤집기</label>
+        <label class="setting check"><input type="checkbox" id="opt-debug"> 영상 속 댄서 인식 확인 (선생님용)</label>
+        <div class="setting-buttons">
+          <button class="btn btn-small" id="btn-fullscreen">⛶ 전체 화면</button>
+          <button class="btn btn-small" id="btn-home">🏠 처음으로</button>
+        </div>
+      </div>
+      <p class="storage-note" id="file-note" hidden></p>
+      <p class="storage-note" id="storage-note" hidden></p>
+      <input type="file" id="file-input" accept="video/*" hidden>
+    </section>
+
+    <!-- ========== 3. 춤추기 화면 ========== -->
+    <section id="screen-play" class="screen">
+      <div class="hud">
+        <div class="hud-song">
+          <div class="hud-stage" id="hud-stage"></div>
+          <div class="hud-title" id="hud-title"></div>
+        </div>
+        <div class="hud-bars">
+          <div class="bar" title="노래 진행"><div class="fill" id="progress-fill"></div></div>
+          <div class="bar beat" title="다음 판정까지"><div class="fill" id="beat-fill"></div></div>
+        </div>
+        <div class="hud-score"><small>점수</small><span id="hud-score">0</span></div>
+      </div>
+
+      <div class="stage">
+        <!-- 왼쪽: 따라 할 댄스 영상 -->
+        <div class="video-box" id="video-box">
+          <video id="dance-video" playsinline preload="auto"></video>
+          <canvas id="dance-canvas"></canvas>
+          <div class="yt-wrap" id="yt-wrap"><div id="yt-player"></div></div>
+          <div class="debug-badge" id="debug-badge" hidden></div>
+
+          <div class="judge" id="judge">
+            <div class="judge-emoji"></div>
+            <div class="judge-text"></div>
+            <div class="judge-points"></div>
+          </div>
+
+          <div class="ready-panel" id="ov-ready">
+            <!-- 유튜브 영상일 때: 화면 공유로 채점 준비 -->
+            <div class="ready-step" id="ready-capture" hidden>
+              <div class="ready-emoji">📺</div>
+              <h3>채점 준비를 해 주세요</h3>
+              <p>버튼을 누르고 <b>"이 탭"</b>을 공유해 주세요.<br>그래야 영상 속 댄서와 동작을 비교할 수 있어요.<br>공유한 화면은 이 컴퓨터 안에서만 쓰이고 저장되지 않아요.</p>
+              <div class="panel-buttons">
+                <button class="btn btn-primary" id="btn-capture">📺 채점 준비하기</button>
+                <button class="btn btn-small" id="btn-no-capture">공유 없이 할래요</button>
+              </div>
+              <p class="capture-msg" id="capture-msg"></p>
+            </div>
+            <!-- 아이 몸이 잘 보이는지 확인 -->
+            <div class="ready-step" id="ready-body">
+              <div class="ready-emoji">🙆</div>
+              <h3 id="ready-msg">카메라에 내 모습이 보이게 서 주세요!</h3>
+              <p>머리부터 무릎까지 보이면 저절로 시작해요</p>
+              <div class="ready-bar"><div class="fill" id="ready-fill"></div></div>
+              <button class="btn btn-primary" id="btn-skip-ready">바로 시작 ▶</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 오른쪽: 내 모습 + 호랑이 친구 -->
+        <div class="side">
+          <div class="cam-box">
+            <video id="cam-video" playsinline muted></video>
+            <canvas id="cam-canvas"></canvas>
+            <div class="cam-label">나의 춤 🪞</div>
+          </div>
+          <div class="buddy" id="buddy">
+            <div class="buddy-mascot" id="buddy-mascot">🐯</div>
+            <div class="buddy-bubble" id="buddy-bubble">같이 춤춰요!</div>
+            <div class="combo" id="combo"></div>
+            <div class="score-mode" id="score-mode"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="play-controls">
+        <button class="btn btn-small" id="btn-pause">⏸ 잠깐 멈춤</button>
+        <button class="btn btn-small" id="btn-quit">✖ 그만하기</button>
+      </div>
+
+      <!-- 겹쳐 뜨는 안내창들 -->
+      <div class="overlay" id="ov-loading">
+        <div class="panel">
+          <svg class="taegeuk spin fast" viewBox="-50 -50 100 100" aria-hidden="true">
+            <circle r="48" fill="#cd2e3a"/>
+            <path d="M-48 0 A48 48 0 0 0 48 0 A24 24 0 0 0 0 0 A24 24 0 0 1 -48 0Z" fill="#0047a0"/>
+          </svg>
+          <h3>호야가 무대를 준비하고 있어요…</h3>
+          <p>카메라를 써도 되냐고 물어보면 <b>"허용"</b>을 눌러 주세요.</p>
+        </div>
+      </div>
+
+      <div class="overlay light" id="ov-countdown">
+        <div class="count" id="count-num">3</div>
+      </div>
+
+      <div class="overlay" id="ov-pause">
+        <div class="panel">
+          <div class="panel-emoji">🍵</div>
+          <h3>잠깐 쉬는 중이에요</h3>
+          <div class="panel-buttons">
+            <button class="btn btn-primary" id="btn-resume">▶ 계속하기</button>
+            <button class="btn" id="btn-pause-quit">노래 고르기로</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="overlay" id="ov-error">
+        <div class="panel">
+          <div class="panel-emoji">😢</div>
+          <h3 id="error-title"></h3>
+          <p id="error-desc"></p>
+          <div class="panel-buttons">
+            <button class="btn btn-primary" id="btn-error-retry">다시 시도</button>
+            <button class="btn" id="btn-error-back">노래 고르기로</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 4. 결과 화면 ========== -->
+    <section id="screen-result" class="screen">
+      <canvas id="confetti"></canvas>
+      <div class="result-card">
+        <div class="result-stage" id="result-stage"></div>
+        <div class="stars" id="stars"><span>★</span><span>★</span><span>★</span></div>
+        <h2 id="result-msg"></h2>
+        <div class="result-score">
+          <span id="result-score">0</span>점
+          <span class="new-record" id="new-record" hidden>🎉 새 기록!</span>
+        </div>
+        <div class="breakdown" id="breakdown"></div>
+        <div class="result-buttons">
+          <button class="btn btn-primary" id="btn-retry">🔁 다시 하기</button>
+          <button class="btn" id="btn-other">🎵 다른 노래</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="saekdong"></div>
+
+  <!-- 화면 공유로 받은 유튜브 영상 (눈에 안 보이게 두고 댄서 인식에만 써요) -->
+  <video id="capture-video" class="capture-video" muted playsinline></video>
+  <script src="game.js"></script>
+</body>
+</html>
