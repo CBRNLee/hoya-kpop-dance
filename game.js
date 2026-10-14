@@ -147,6 +147,7 @@ const S = {
   dancerHist: [], prevDancer: null, prevChild: null,
   lastChild: null, readyTime: 0, childColor: '#ffffff',
   stallTime: 0, debugDancer: '',
+  directPlay: false,      // 자동 재생이 막혀서 [계속하기]를 누르는 순간 틀어야 할 때
 };
 
 const sourceOf = (song) => (song.fixedFile ? 'fixed' : S.settings.source[song.id] || 'youtube');
@@ -258,10 +259,9 @@ function renderSongs() {
     const best = S.best[song.id];
     const fixedUrl = S.fixed[song.id];
     let info;
-    if (src === 'fixed') {
-      if (fixedUrl) info = `<span class="status ok" title="${escapeHTML(fixedUrl)}">✅ ${escapeHTML(fixedUrl)}</span>`;
-      else if (location.protocol === 'file:') info = '<span class="status no">⚠️ 사용법대로 주소로 열어 주세요</span>';
-      else info = `<span class="status no" title="${song.fixedFile}.mp4">⚠️ ${song.fixedFile}.mp4 를 넣어 주세요</span>`;
+    if (src === 'fixed' && fixedUrl) {
+      // 이 맥에서 열었을 때: videos 폴더 영상을 자동으로 써요
+      info = `<span class="status ok" title="${escapeHTML(fixedUrl)}">✅ ${escapeHTML(fixedUrl)}</span>`;
     } else if (src === 'youtube') {
       info = `<span class="status ok" title="${escapeHTML(ytLabelOf(song))}">📺 ${escapeHTML(ytLabelOf(song))}</span>
               <button class="link-btn btn-yt">주소 바꾸기</button>`;
@@ -283,7 +283,7 @@ function renderSongs() {
         <div class="song-title">${song.title}</div>
         <div class="song-artist">${song.en} · ${song.artist}</div>
         ${src === 'fixed'
-          ? '<div class="source-fixed">📁 컴퓨터 영상으로 고정</div>'
+          ? '<div class="source-fixed">📁 이 기기에 있는 영상으로 고정</div>'
           : `<div class="source-tabs">
               <button data-src="youtube" class="${src === 'youtube' ? 'active' : ''}">▶ 유튜브</button>
               <button data-src="file" class="${src === 'file' ? 'active' : ''}">🎬 내 영상</button>
@@ -291,7 +291,7 @@ function renderSongs() {
         <div class="source-info">${info}</div>
         <div class="best">${best ? `🏆 최고 점수 ${best}점` : ''}</div>
         <div class="card-buttons">
-          <button class="btn btn-primary btn-play" ${src === 'youtube' || (src === 'fixed' ? fixedUrl : v) ? '' : 'disabled'}>춤추기! 💃</button>
+          <button class="btn btn-primary btn-play" ${src === 'youtube' || fixedUrl || v ? '' : 'disabled'}>춤추기! 💃</button>
         </div>
       </div>`;
     card.querySelectorAll('.source-tabs button').forEach((b) => b.addEventListener('click', () => {
@@ -355,7 +355,8 @@ async function onVideoPicked(e) {
   saveSettings();
   renderSongs();
   if (S.dbOk) {
-    try { await dbPut(id, { blob: file, name: file.name }); }
+    // 파일을 Blob으로 바꿔서 저장해요 (사파리에서도 안전하게 저장되도록)
+    try { await dbPut(id, { blob: new Blob([file], { type: file.type || 'video/mp4' }), name: file.name }); }
     catch (err) { console.warn('영상 저장 실패', err); setStorageWarning(); }
   }
 }
@@ -622,9 +623,15 @@ async function onCaptureClick() {
   }
 }
 
+// "이 탭 공유"로 영상 부분만 잘라 보는 기능이 있는 브라우저인지 (크롬은 O, 사파리·아이패드는 X)
+function captureSupported() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia && window.CropTarget);
+}
+
 function updateScoreMode() {
   const exact = media.kind === 'file' || !!S.capture;
-  $('score-mode').textContent = exact ? '🎯 동작 비교 채점 중' : '💃 움직임 채점 중 (화면 공유 꺼짐)';
+  $('score-mode').textContent = exact ? '🎯 동작 비교 채점 중'
+    : captureSupported() ? '💃 움직임 채점 중 (화면 공유 꺼짐)' : '💃 움직임 채점 중';
   S.debugDancer = exact ? '댄서 찾는 중…' : '화면 공유 꺼짐 (움직임으로 채점)';
   if (S.settings.debug) $('debug-badge').textContent = S.debugDancer;
 }
@@ -825,8 +832,9 @@ function resetGame() {
 async function startSong(song) {
   const src = sourceOf(song);
   const v = S.videos[song.id];
-  if (src === 'file' && !v) return;
-  if (src === 'fixed' && !S.fixed[song.id]) return;
+  // 고정 곡: 이 맥에서는 videos 폴더 영상, 사이트·아이패드에서는 '영상 넣기'로 고른 영상
+  const fileUrl = src === 'fixed' ? S.fixed[song.id] || (v && v.url) : v && v.url;
+  if (src !== 'youtube' && !fileUrl) return;
   const runId = ++S.runId;
   S.countToken++;
   S.song = song;
@@ -842,6 +850,10 @@ async function startSong(song) {
   // 유튜브 영상 위에 글자가 있으면 댄서 인식을 방해해서, 판정 글자를 오른쪽 칸에 띄워요
   (src === 'youtube' ? $('buddy') : el.videoBox).appendChild(el.judge);
   $('debug-badge').hidden = !S.settings.debug;
+  if (src !== 'youtube') {
+    el.danceVideo.src = fileUrl;
+    unlockVideo(); // 버튼을 누른 지금 바로 해야 사파리가 나중에 소리 있는 재생을 허락해요
+  }
 
   showScreen('play');
   setPhase('loading');
@@ -853,8 +865,6 @@ async function startSong(song) {
       if (location.protocol === 'file:') throw taggedError('youtube', 'file');
       prepare = prepareYouTube(ytIdOf(song));
     } else {
-      el.danceVideo.src = src === 'fixed' ? S.fixed[song.id] : v.url;
-      el.danceVideo.currentTime = 0;
       prepare = waitVideoReady();
     }
     await Promise.all([ensureModels(), ensureCamera(), prepare]);
@@ -864,8 +874,19 @@ async function startSong(song) {
   }
   if (runId !== S.runId || S.phase !== 'loading') return; // 그사이 그만두었으면 멈춤
   updateScoreMode();
-  showReadyStep(src === 'youtube' && !S.capture ? 'capture' : 'body');
+  showReadyStep(src === 'youtube' && !S.capture && captureSupported() ? 'capture' : 'body');
   setPhase('ready');
+}
+
+// 사파리(특히 아이패드)는 사람이 버튼을 누른 순간에만 소리 있는 영상을 틀 수 있게 해요.
+// 그래서 [춤추기]를 누를 때 소리를 끈 채 아주 잠깐 틀었다 멈춰서 미리 허락을 받아 둬요.
+function unlockVideo() {
+  const v = el.danceVideo;
+  v.muted = true;
+  const p = v.play();
+  const restore = () => { v.pause(); v.muted = false; v.currentTime = 0; };
+  if (p && p.then) p.then(restore, () => { v.muted = false; });
+  else restore();
 }
 
 function showReadyStep(step) {
@@ -886,9 +907,18 @@ function beginDancing() {
 
 function playVideo() {
   S.stallTime = 0;
+  S.directPlay = false;
   media.play()
     .then(() => setPhase('playing'))
-    .catch(() => setPhase('paused')); // 브라우저가 자동 재생을 막으면 [계속하기]를 눌러 시작
+    .catch(() => showPause(true)); // 브라우저가 자동 재생을 막으면 [계속하기]를 누르는 순간 바로 틀어요
+}
+
+// 멈춤 화면 보여 주기 (direct: 자동 재생이 막혀서 버튼을 눌러야 시작할 수 있을 때)
+function showPause(direct) {
+  S.directPlay = direct;
+  const title = $('pause-title'); // 브라우저가 예전 화면 파일을 기억하고 있어도 멈추지 않게 확인
+  if (title) title.textContent = direct ? '▶ 계속하기를 누르면 시작해요' : '잠깐 쉬는 중이에요';
+  setPhase('paused');
 }
 
 function runCountdown(done) {
@@ -911,17 +941,19 @@ function runCountdown(done) {
   step();
 }
 
-function pauseGame() {
+function pauseGame(direct = false) {
   if (S.phase !== 'playing') return;
   media.pause();
   S.prevChild = null;
   S.prevDancer = null;
-  setPhase('paused');
+  showPause(direct);
 }
 
 function resumeGame() {
   if (S.phase !== 'paused') return;
-  runCountdown(playVideo);
+  // 자동 재생이 막혔던 경우에는 카운트다운 없이 누른 순간 바로 틀어요 (사파리·아이패드)
+  if (S.directPlay) playVideo();
+  else runCountdown(playVideo);
 }
 
 function quitToSelect() {
@@ -1046,7 +1078,7 @@ function updatePlaying(dt) {
   if (media.kind === 'youtube') {
     const state = yt.player && yt.player.getPlayerState ? yt.player.getPlayerState() : -1;
     S.stallTime = state === 2 || state === 5 || state === -1 ? S.stallTime + dt : 0;
-    if (S.stallTime > 3) { pauseGame(); return; }
+    if (S.stallTime > 3) { pauseGame(true); return; } // 다시 누르면 카운트다운 없이 바로 틀어요
   }
 
   if (vt - S.winStart >= JUDGE_INTERVAL) {
@@ -1199,6 +1231,7 @@ let audioCtx = null;
 function beep(freq, dur = 0.12, vol = 0.08) {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume(); // 사파리는 소리 장치가 잠들어 있을 수 있어요
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
     o.type = 'sine';
@@ -1215,8 +1248,16 @@ function beep(freq, dur = 0.12, vol = 0.08) {
    버튼 연결 + 시작
    ========================================================= */
 function toggleFullscreen() {
-  if (document.fullscreenElement) document.exitFullscreen();
-  else document.documentElement.requestFullscreen().catch(() => {});
+  const d = document, root = d.documentElement;
+  // 사파리(아이패드)는 webkit으로 시작하는 이름을 써요
+  if (d.fullscreenElement || d.webkitFullscreenElement) {
+    (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+    return;
+  }
+  const request = root.requestFullscreen || root.webkitRequestFullscreen;
+  if (!request) { alert('이 기기에서는 전체 화면을 쓸 수 없어요.'); return; }
+  const r = request.call(root);
+  if (r && r.catch) r.catch(() => {});
 }
 
 function bindUI() {
