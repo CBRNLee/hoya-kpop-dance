@@ -50,13 +50,13 @@ const ICONS = {
 
 // ---------- 2. 노래 목록 (곡을 바꾸거나 늘리려면 여기를 고치세요) ----------
 // youtube: 처음에 연결해 둔 유튜브 영상 (선생님이 노래 카드의 [주소 바꾸기]로 바꿀 수 있어요)
-// defaultSource: 'file'이면 처음 열었을 때 '🎬 내 영상'이 골라져 있어요
-//   (소다팝·골든은 저스트댄스 팬 영상이 다른 사이트 재생을 막아 둬서, 선생님이 찍은 영상을 쓰기로 했어요)
+// fixedFile: 게임 폴더의 videos 폴더에 있는 영상으로 고정 (예: videos/soda-pop.mp4)
+//   (소다팝·골든은 저스트댄스 팬 영상이 다른 사이트 재생을 막아 둬서, 컴퓨터에 있는 영상을 쓰기로 했어요)
 const SONGS = [
   { id: 'soda-pop',    title: '소다팝',   en: 'Soda Pop',    artist: '케이팝 데몬 헌터스', stage: '서울 남산 무대', icon: ICONS.seoul,  bg: 'linear-gradient(160deg, #3b2a8f 0%, #ff5fa2 100%)',
-    defaultSource: 'file', youtube: { id: 'eny0BqmSwmM', label: '넷플릭스 공식 가사 영상' } },
+    fixedFile: 'videos/soda-pop' },
   { id: 'golden',      title: '골든',     en: 'Golden',      artist: '케이팝 데몬 헌터스', stage: '경복궁 무대',    icon: ICONS.palace, bg: 'linear-gradient(160deg, #ffcf3f 0%, #ff8a3d 100%)',
-    defaultSource: 'file', youtube: { id: 'VqpB787pGpE', label: '넷플릭스 공식 MAMA 무대' } },
+    fixedFile: 'videos/golden' },
   { id: 'its-me',      title: '잇츠미',   en: "IT'S ME",     artist: '아일릿',             stage: '제주도 무대',    icon: ICONS.jeju,   bg: 'linear-gradient(160deg, #9be15d 0%, #00b894 100%)',
     youtube: { id: 'xYQiE4SZ1F0', label: '저스트댄스 팬메이드 · EvmeJD' } },
   { id: 'catch-catch', title: '캐치캐치', en: 'Catch Catch', artist: '최예나',             stage: '부산 바다 무대', icon: ICONS.busan,  bg: 'linear-gradient(160deg, #4facfe 0%, #00c6e0 100%)',
@@ -85,6 +85,7 @@ const VISION_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISIO
 const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION_VER}/wasm`;
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
 const YT_API_URL = 'https://www.youtube.com/iframe_api';
+const VIDEO_EXTS = ['mp4', 'webm', 'mov', 'm4v']; // videos 폴더에서 찾아볼 영상 종류
 
 const JUDGE_INTERVAL = 1.5; // 몇 초마다 판정할지
 const LAG_WINDOW = 1.0;     // 아이가 조금 늦게 따라 해도 봐주는 시간(초)
@@ -134,7 +135,8 @@ const S = {
   models: null,           // { cam, vid } 자세 인식기 2개 (카메라용, 영상용)
   modelPromise: null,
   settings: { difficulty: 'easy', flip: false, debug: false, source: {}, yt: {} },
-  videos: {},             // 노래 id → { blob, name, url }
+  videos: {},             // 노래 id → { blob, name, url }  (영상 넣기로 고른 영상)
+  fixed: {},              // 노래 id → videos 폴더에서 찾은 영상 주소 (없으면 null)
   best: {},
   pickingFor: null,
   dbOk: true,
@@ -147,7 +149,7 @@ const S = {
   stallTime: 0, debugDancer: '',
 };
 
-const sourceOf = (song) => S.settings.source[song.id] || song.defaultSource || 'youtube';
+const sourceOf = (song) => (song.fixedFile ? 'fixed' : S.settings.source[song.id] || 'youtube');
 const ytIdOf = (song) => S.settings.yt[song.id] || song.youtube.id;
 const ytLabelOf = (song) => (S.settings.yt[song.id] ? '선생님이 넣은 유튜브 영상' : song.youtube.label);
 
@@ -202,6 +204,21 @@ async function loadStoredVideos() {
     setStorageWarning();
   }
 }
+// 고정 곡(소다팝·골든)의 영상이 videos 폴더에 있는지 찾아봐요
+async function findFixedVideos() {
+  if (location.protocol === 'file:') return; // 파일로 직접 열면 폴더를 확인할 수 없어요
+  await Promise.all(SONGS.filter((s) => s.fixedFile).map(async (song) => {
+    S.fixed[song.id] = null;
+    for (const ext of VIDEO_EXTS) {
+      const url = `${song.fixedFile}.${ext}`;
+      try {
+        const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+        if (res.ok) { S.fixed[song.id] = url; return; }
+      } catch (e) { /* 다음 종류로 다시 찾아봐요 */ }
+    }
+  }));
+}
+
 function setStorageWarning() {
   S.dbOk = false;
   const note = $('storage-note');
@@ -239,8 +256,13 @@ function renderSongs() {
     const src = sourceOf(song);
     const v = S.videos[song.id];
     const best = S.best[song.id];
+    const fixedUrl = S.fixed[song.id];
     let info;
-    if (src === 'youtube') {
+    if (src === 'fixed') {
+      if (fixedUrl) info = `<span class="status ok" title="${escapeHTML(fixedUrl)}">✅ ${escapeHTML(fixedUrl)}</span>`;
+      else if (location.protocol === 'file:') info = '<span class="status no">⚠️ 사용법대로 주소로 열어 주세요</span>';
+      else info = `<span class="status no" title="${song.fixedFile}.mp4">⚠️ ${song.fixedFile}.mp4 를 넣어 주세요</span>`;
+    } else if (src === 'youtube') {
       info = `<span class="status ok" title="${escapeHTML(ytLabelOf(song))}">📺 ${escapeHTML(ytLabelOf(song))}</span>
               <button class="link-btn btn-yt">주소 바꾸기</button>`;
     } else if (v) {
@@ -260,14 +282,16 @@ function renderSongs() {
       <div class="body">
         <div class="song-title">${song.title}</div>
         <div class="song-artist">${song.en} · ${song.artist}</div>
-        <div class="source-tabs">
-          <button data-src="youtube" class="${src === 'youtube' ? 'active' : ''}">▶ 유튜브</button>
-          <button data-src="file" class="${src === 'file' ? 'active' : ''}">🎬 내 영상</button>
-        </div>
+        ${src === 'fixed'
+          ? '<div class="source-fixed">📁 컴퓨터 영상으로 고정</div>'
+          : `<div class="source-tabs">
+              <button data-src="youtube" class="${src === 'youtube' ? 'active' : ''}">▶ 유튜브</button>
+              <button data-src="file" class="${src === 'file' ? 'active' : ''}">🎬 내 영상</button>
+            </div>`}
         <div class="source-info">${info}</div>
         <div class="best">${best ? `🏆 최고 점수 ${best}점` : ''}</div>
         <div class="card-buttons">
-          <button class="btn btn-primary btn-play" ${src === 'youtube' || v ? '' : 'disabled'}>춤추기! 💃</button>
+          <button class="btn btn-primary btn-play" ${src === 'youtube' || (src === 'fixed' ? fixedUrl : v) ? '' : 'disabled'}>춤추기! 💃</button>
         </div>
       </div>`;
     card.querySelectorAll('.source-tabs button').forEach((b) => b.addEventListener('click', () => {
@@ -802,18 +826,19 @@ async function startSong(song) {
   const src = sourceOf(song);
   const v = S.videos[song.id];
   if (src === 'file' && !v) return;
+  if (src === 'fixed' && !S.fixed[song.id]) return;
   const runId = ++S.runId;
   S.countToken++;
   S.song = song;
   media.stop();
-  media.kind = src;
+  media.kind = src === 'youtube' ? 'youtube' : 'file'; // videos 폴더 영상도 '내 영상'과 똑같이 틀어요
   resetGame();
 
   $('screen-play').style.setProperty('--stage-bg', song.bg);
   $('hud-stage').textContent = '📍 ' + song.stage;
   $('hud-title').textContent = `${song.title} (${song.en})`;
   el.videoBox.classList.toggle('mode-youtube', src === 'youtube');
-  el.videoBox.classList.toggle('flip', src === 'file' && S.settings.flip);
+  el.videoBox.classList.toggle('flip', src !== 'youtube' && S.settings.flip);
   // 유튜브 영상 위에 글자가 있으면 댄서 인식을 방해해서, 판정 글자를 오른쪽 칸에 띄워요
   (src === 'youtube' ? $('buddy') : el.videoBox).appendChild(el.judge);
   $('debug-badge').hidden = !S.settings.debug;
@@ -828,7 +853,7 @@ async function startSong(song) {
       if (location.protocol === 'file:') throw taggedError('youtube', 'file');
       prepare = prepareYouTube(ytIdOf(song));
     } else {
-      el.danceVideo.src = v.url;
+      el.danceVideo.src = src === 'fixed' ? S.fixed[song.id] : v.url;
       el.danceVideo.currentTime = 0;
       prepare = waitVideoReady();
     }
@@ -1195,7 +1220,12 @@ function toggleFullscreen() {
 }
 
 function bindUI() {
-  $('btn-start').addEventListener('click', () => { beep(660); showScreen('select'); });
+  $('btn-start').addEventListener('click', async () => {
+    beep(660);
+    showScreen('select');
+    await findFixedVideos(); // 그사이 videos 폴더에 영상을 넣었을 수도 있으니 다시 찾아봐요
+    renderSongs();
+  });
   $('btn-home').addEventListener('click', () => { stopCamera(); stopCapture(); showScreen('title'); });
   $('btn-fullscreen').addEventListener('click', toggleFullscreen);
   $('file-input').addEventListener('change', onVideoPicked);
@@ -1251,7 +1281,7 @@ async function init() {
   bindUI();
   renderSettings();
   renderSongs();
-  await loadStoredVideos();
+  await Promise.all([loadStoredVideos(), findFixedVideos()]);
   renderSongs();
 }
 

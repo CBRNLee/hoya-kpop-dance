@@ -186,6 +186,16 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 400; margin: 0; }
   cursor: pointer;
 }
 .source-tabs button.active { background: var(--taegeuk-red); color: #fff; }
+.source-fixed {
+  margin-top: 4px;
+  padding: .45em .6em;
+  border-radius: 999px;
+  background: #f1e6d3;
+  font-family: var(--font-title);
+  font-size: 1rem;
+  color: var(--ink-soft);
+  text-align: center;
+}
 .source-info { display: flex; align-items: center; gap: 8px; min-height: 1.6em; }
 .source-info .status { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .link-btn {
