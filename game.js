@@ -9,7 +9,7 @@
    3) 1.5초마다 판정해서 "최고야 / 잘했어 / 좋아 / 다시 해봐"를 보여 줘요.
 
    댄스 영상은 두 가지 중에 고를 수 있어요
-   - ▶ 유튜브: 공식 유튜브 영상을 게임 안에서 틀어요. "이 탭 공유"를 허용하면 영상 속 댄서와 비교해 채점해요.
+   - ▶ 유튜브: 유튜브 영상을 게임 안에서 틀어요. "이 탭 공유"를 허용하면 영상 속 댄서와 비교해 채점해요.
    - 🎬 내 영상: 선생님이 가진 영상 파일(mp4)을 넣어서 틀어요.
    ========================================================= */
 
@@ -49,16 +49,18 @@ const ICONS = {
 };
 
 // ---------- 2. 노래 목록 (곡을 바꾸거나 늘리려면 여기를 고치세요) ----------
-// youtube: 처음에 연결해 둔 공식 유튜브 영상 (선생님이 노래 카드의 [주소 바꾸기]로 바꿀 수 있어요)
+// youtube: 처음에 연결해 둔 유튜브 영상 (선생님이 노래 카드의 [주소 바꾸기]로 바꿀 수 있어요)
+// defaultSource: 'file'이면 처음 열었을 때 '🎬 내 영상'이 골라져 있어요
+//   (소다팝·골든은 저스트댄스 팬 영상이 다른 사이트 재생을 막아 둬서, 선생님이 찍은 영상을 쓰기로 했어요)
 const SONGS = [
   { id: 'soda-pop',    title: '소다팝',   en: 'Soda Pop',    artist: '케이팝 데몬 헌터스', stage: '서울 남산 무대', icon: ICONS.seoul,  bg: 'linear-gradient(160deg, #3b2a8f 0%, #ff5fa2 100%)',
-    youtube: { id: 'eny0BqmSwmM', label: '넷플릭스 공식 가사 영상' } },
+    defaultSource: 'file', youtube: { id: 'eny0BqmSwmM', label: '넷플릭스 공식 가사 영상' } },
   { id: 'golden',      title: '골든',     en: 'Golden',      artist: '케이팝 데몬 헌터스', stage: '경복궁 무대',    icon: ICONS.palace, bg: 'linear-gradient(160deg, #ffcf3f 0%, #ff8a3d 100%)',
-    youtube: { id: 'VqpB787pGpE', label: '넷플릭스 공식 MAMA 무대' } },
+    defaultSource: 'file', youtube: { id: 'VqpB787pGpE', label: '넷플릭스 공식 MAMA 무대' } },
   { id: 'its-me',      title: '잇츠미',   en: "IT'S ME",     artist: '아일릿',             stage: '제주도 무대',    icon: ICONS.jeju,   bg: 'linear-gradient(160deg, #9be15d 0%, #00b894 100%)',
-    youtube: { id: 'LM875jeR-PM', label: '아일릿 공식 안무 영상' } },
+    youtube: { id: 'xYQiE4SZ1F0', label: '저스트댄스 팬메이드 · EvmeJD' } },
   { id: 'catch-catch', title: '캐치캐치', en: 'Catch Catch', artist: '최예나',             stage: '부산 바다 무대', icon: ICONS.busan,  bg: 'linear-gradient(160deg, #4facfe 0%, #00c6e0 100%)',
-    youtube: { id: 'P3j4RexyOBI', label: '예나 공식 안무 영상' } },
+    youtube: { id: 'LrhZClX_1-Q', label: '저스트댄스 팬메이드 · Jean Braz' } },
 ];
 
 // ---------- 3. 난이도 (숫자가 낮을수록 점수를 후하게 줘요) ----------
@@ -145,7 +147,7 @@ const S = {
   stallTime: 0, debugDancer: '',
 };
 
-const sourceOf = (song) => S.settings.source[song.id] || 'youtube';
+const sourceOf = (song) => S.settings.source[song.id] || song.defaultSource || 'youtube';
 const ytIdOf = (song) => S.settings.yt[song.id] || song.youtube.id;
 const ytLabelOf = (song) => (S.settings.yt[song.id] ? '선생님이 넣은 유튜브 영상' : song.youtube.label);
 
@@ -293,7 +295,7 @@ function parseYouTubeId(text) {
 function changeYouTube(song) {
   const current = S.settings.yt[song.id];
   const input = prompt(
-    `'${song.title}'에 연결할 유튜브 주소를 붙여 넣어 주세요.\n(비워 두고 확인을 누르면 원래 공식 영상으로 돌아가요)`,
+    `'${song.title}'에 연결할 유튜브 주소를 붙여 넣어 주세요.\n(비워 두고 확인을 누르면 처음 연결된 영상으로 돌아가요)`,
     current ? `https://youtu.be/${current}` : '',
   );
   if (input === null) return;
