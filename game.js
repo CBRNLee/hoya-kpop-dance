@@ -79,6 +79,14 @@ const JUDGES = {
   away:    { text: '어디 있지?', emoji: '👀', points: 0,   color: '#ffffff', buddy: '카메라 앞으로 와 줘!' },
 };
 
+// ---------- 4-1. 두 명이 할 때의 팀 (민화 '까치호랑이'에서 따온 짝) ----------
+// 카메라 화면에서 왼쪽에 선 아이가 호랑이팀, 오른쪽에 선 아이가 까치팀이에요
+const TEAMS = [
+  { name: '호랑이팀', emoji: '🐯', color: '#e63946' },
+  { name: '까치팀',   emoji: '🐦', color: '#2f80ed' },
+];
+const RANK = { away: 0, miss: 1, good: 2, great: 3, perfect: 4 }; // 판정 순서 (효과음·말풍선 고를 때 사용)
+
 // ---------- 5. 세부 설정 ----------
 const VISION_VER = '0.10.14';
 const VISION_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION_VER}/vision_bundle.mjs`;
@@ -119,7 +127,8 @@ const el = {
   danceVideo: $('dance-video'), danceCanvas: $('dance-canvas'),
   camVideo: $('cam-video'), camCanvas: $('cam-canvas'),
   captureVideo: $('capture-video'),
-  videoBox: $('video-box'), judge: $('judge'),
+  videoBox: $('video-box'),
+  judges: [$('judge')],   // 판정 글자 (두 명이면 2개)
 };
 
 const S = {
@@ -134,18 +143,18 @@ const S = {
   capture: null,          // 화면 공유 { stream, track }
   models: null,           // { cam, vid } 자세 인식기 2개 (카메라용, 영상용)
   modelPromise: null,
-  settings: { difficulty: 'easy', flip: false, debug: false, source: {}, yt: {} },
+  settings: { difficulty: 'easy', flip: false, debug: false, players: 1, source: {}, yt: {} },
   videos: {},             // 노래 id → { blob, name, url }  (영상 넣기로 고른 영상)
   fixed: {},              // 노래 id → videos 폴더에서 찾은 영상 주소 (없으면 null)
   best: {},
   pickingFor: null,
   dbOk: true,
   // 한 판 동안 쓰는 값
-  score: 0, combo: 0, maxCombo: 0, judged: 0,
-  counts: { perfect: 0, great: 0, good: 0, miss: 0 },
-  winStart: 0, win: null,
-  dancerHist: [], prevDancer: null, prevChild: null,
-  lastChild: null, readyTime: 0, childColor: '#ffffff',
+  players: [],            // 춤추는 아이들 (1명 또는 2명) → newPlayer() 참고
+  winStart: 0,
+  dancerWin: null,        // 이번 판정 구간 동안 댄서가 움직인 양
+  dancerHist: [], prevDancer: null,
+  readyTime: 0,
   stallTime: 0, debugDancer: '',
   directPlay: false,      // 자동 재생이 막혀서 [계속하기]를 누르는 순간 틀어야 할 때
 };
@@ -365,6 +374,9 @@ function renderSettings() {
   document.querySelectorAll('#difficulty button').forEach((b) => {
     b.classList.toggle('active', b.dataset.value === S.settings.difficulty);
   });
+  document.querySelectorAll('#players-seg button').forEach((b) => {
+    b.classList.toggle('active', Number(b.dataset.value) === S.settings.players);
+  });
   $('opt-flip').checked = S.settings.flip;
   $('opt-debug').checked = S.settings.debug;
 }
@@ -385,24 +397,25 @@ function ensureModels() {
     S.modelPromise = (async () => {
       const vision = await import(VISION_URL);
       const fileset = await vision.FilesetResolver.forVisionTasks(WASM_URL);
-      const make = (delegate) => vision.PoseLandmarker.createFromOptions(fileset, {
+      const make = (delegate, numPoses) => vision.PoseLandmarker.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: MODEL_URL, delegate },
         runningMode: 'VIDEO',
-        numPoses: 1,
+        numPoses,
         minPoseDetectionConfidence: 0.5,
         minPosePresenceConfidence: 0.5,
         minTrackingConfidence: 0.5,
       });
       // 카메라용·영상용 인식기를 따로 만들어요 (서로 섞이지 않게)
+      // 카메라는 아이를 최대 2명까지 찾고, 영상은 댄서 1명만 찾아요
       let cam = null, vid = null;
       try {
-        cam = await make('GPU');
-        vid = await make('GPU');
+        cam = await make('GPU', 2);
+        vid = await make('GPU', 1);
       } catch (e) {
         console.warn('GPU로 실행할 수 없어 CPU로 바꿔요', e);
         if (cam) cam.close();
-        cam = await make('CPU');
-        vid = await make('CPU');
+        cam = await make('CPU', 2);
+        vid = await make('CPU', 1);
       }
       S.models = { cam, vid };
     })().catch((e) => {
@@ -762,14 +775,28 @@ function moveSpeed(prev, cur, dt) {
 /* =========================================================
    뼈대 그리기
    ========================================================= */
-function drawSkeleton(canvas, video, lm, color) {
+// items: [{ lm: 관절 좌표, color: 색 }, ...]  centerLine: 두 명일 때 가운데 점선
+function drawSkeletons(canvas, video, items, centerLine = false) {
   const w = video.videoWidth, h = video.videoHeight;
   if (!w || !h) return;
   if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, w, h);
-  if (!lm) return;
+  if (centerLine) {
+    ctx.save();
+    ctx.setLineDash([w / 40, w / 60]);
+    ctx.lineWidth = Math.max(3, w / 200);
+    ctx.strokeStyle = 'rgba(255,255,255,.8)';
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 0);
+    ctx.lineTo(w / 2, h);
+    ctx.stroke();
+    ctx.restore();
+  }
+  for (const { lm, color } of items) if (lm) drawOneSkeleton(ctx, lm, w, h, color);
+}
 
+function drawOneSkeleton(ctx, lm, w, h, color) {
   const ok = (i) => lm[i] && (lm[i].visibility ?? 1) >= VIS_MIN;
   const lw = Math.max(5, w / 90);
   ctx.lineCap = 'round';
@@ -805,27 +832,80 @@ function drawSkeleton(canvas, video, lm, color) {
 /* =========================================================
    게임 진행
    ========================================================= */
+// 판정 구간(1.5초) 동안 아이 한 명의 기록
 function newWindow() {
-  return { childFrames: 0, poseScores: [], childEnergy: 0, childEnergyN: 0, dancerEnergy: 0, dancerEnergyN: 0 };
+  return { childFrames: 0, poseScores: [], childEnergy: 0, childEnergyN: 0 };
+}
+
+// 춤추는 아이 한 명의 점수판
+function newPlayer(i) {
+  return {
+    team: TEAMS[i],
+    score: 0, combo: 0, maxCombo: 0, judged: 0,
+    counts: { perfect: 0, great: 0, good: 0, miss: 0 },
+    win: newWindow(),
+    prevChild: null,      // 바로 전 자세 (움직인 양 계산용)
+    lm: null,             // 지금 카메라에서 찾은 관절
+    color: '#ffffff',     // 한 명일 때 뼈대 색 (판정에 따라 바뀜)
+  };
+}
+
+const isDuo = () => S.players.length > 1;
+
+// 새 판정 구간 시작: 아이들 기록과 댄서 움직임을 비워요
+function resetWindows() {
+  S.players.forEach((P) => { P.win = newWindow(); });
+  S.dancerWin = { sum: 0, n: 0 };
+}
+
+// 위쪽 점수판: 한 명이면 '점수', 두 명이면 팀마다 따로
+function renderHudScores() {
+  $('hud-scores').innerHTML = S.players.map((P, i) => `
+    <div class="hud-score${isDuo() ? ' team' : ''}" style="--team:${P.team.color}">
+      <small>${isDuo() ? `${P.team.emoji} ${P.team.name}` : '점수'}</small>
+      <span id="score-${i}">0</span>
+    </div>`).join('');
+}
+
+// 판정 글자 준비: 두 명이면 왼쪽(호랑이)·오른쪽(까치)에 하나씩
+function setupJudges(container) {
+  document.querySelectorAll('.judge.clone').forEach((n) => n.remove());
+  const base = $('judge');
+  el.judges = [base];
+  if (isDuo()) {
+    const copy = base.cloneNode(true);
+    copy.removeAttribute('id');
+    el.judges.push(copy);
+  }
+  el.judges.forEach((j, i) => {
+    j.dataset.base = 'judge' + (i > 0 ? ' clone' : '') + (isDuo() ? (i === 0 ? ' slot-left' : ' slot-right') : '');
+    j.className = j.dataset.base;
+    j.querySelector('.judge-team').textContent = isDuo() ? `${TEAMS[i].emoji} ${TEAMS[i].name}` : '';
+    container.appendChild(j);
+  });
 }
 
 function resetGame() {
+  S.players = Array.from({ length: S.settings.players === 2 ? 2 : 1 }, (_, i) => newPlayer(i));
   Object.assign(S, {
-    score: 0, combo: 0, maxCombo: 0, judged: 0,
-    counts: { perfect: 0, great: 0, good: 0, miss: 0 },
-    winStart: 0, win: newWindow(),
-    dancerHist: [], prevDancer: null, prevChild: null,
-    lastChild: null, readyTime: 0, childColor: '#ffffff',
+    winStart: 0,
+    dancerHist: [], prevDancer: null,
+    readyTime: 0,
     stallTime: 0,
   });
-  $('hud-score').textContent = '0';
+  resetWindows();
+  renderHudScores();
+  $('screen-play').classList.toggle('duo', isDuo());
+  $('cam-label').textContent = isDuo() ? '우리의 춤 🪞' : '나의 춤 🪞';
+  $('ready-sub').textContent = isDuo()
+    ? '왼쪽은 🐯 호랑이팀, 오른쪽은 🐦 까치팀! 머리부터 무릎까지 보이면 저절로 시작해요'
+    : '머리부터 무릎까지 보이면 저절로 시작해요';
   $('progress-fill').style.width = '0%';
   $('beat-fill').style.width = '0%';
   $('combo').textContent = '';
-  $('buddy-bubble').textContent = '같이 춤춰요!';
+  $('buddy-bubble').textContent = isDuo() ? '둘이 같이 춤춰요!' : '같이 춤춰요!';
   $('ready-fill').style.width = '0%';
   $('capture-msg').textContent = '';
-  el.judge.className = 'judge';
   el.danceCanvas.getContext('2d').clearRect(0, 0, el.danceCanvas.width, el.danceCanvas.height);
 }
 
@@ -847,8 +927,9 @@ async function startSong(song) {
   $('hud-title').textContent = `${song.title} (${song.en})`;
   el.videoBox.classList.toggle('mode-youtube', src === 'youtube');
   el.videoBox.classList.toggle('flip', src !== 'youtube' && S.settings.flip);
-  // 유튜브 영상 위에 글자가 있으면 댄서 인식을 방해해서, 판정 글자를 오른쪽 칸에 띄워요
-  (src === 'youtube' ? $('buddy') : el.videoBox).appendChild(el.judge);
+  // 판정 글자는 카메라 화면(아이 모습) 위에 띄워요
+  // (유튜브 영상을 가리지 않아서 화면 공유 채점도 방해하지 않아요)
+  setupJudges($('cam-box'));
   $('debug-badge').hidden = !S.settings.debug;
   if (src !== 'youtube') {
     el.danceVideo.src = fileUrl;
@@ -900,7 +981,7 @@ function beginDancing() {
   if (S.phase !== 'ready') return;
   runCountdown(() => {
     S.winStart = media.time();
-    S.win = newWindow();
+    resetWindows();
     playVideo();
   });
 }
@@ -944,7 +1025,7 @@ function runCountdown(done) {
 function pauseGame(direct = false) {
   if (S.phase !== 'playing') return;
   media.pause();
-  S.prevChild = null;
+  S.players.forEach((P) => { P.prevChild = null; });
   S.prevDancer = null;
   showPause(direct);
 }
@@ -975,14 +1056,42 @@ function stopLoop() {
   S.raf = 0;
 }
 
-function detect(landmarker, video, ts) {
+// 찾은 사람들의 관절 목록 (없으면 빈 목록)
+function detectPoses(landmarker, video, ts) {
   try {
     const res = landmarker.detectForVideo(video, ts);
-    return (res && res.landmarks && res.landmarks[0]) || null;
+    return (res && res.landmarks) || [];
   } catch (e) {
     console.warn('인식 오류', e);
-    return null;
+    return [];
   }
+}
+
+// 거울처럼 보이는 카메라 화면에서 사람이 선 가로 위치 (0 = 왼쪽 끝, 1 = 오른쪽 끝)
+function screenX(lm) {
+  let joints = [11, 12, 23, 24].filter((i) => (lm[i].visibility ?? 0) >= VIS_MIN);
+  if (!joints.length) joints = [0, 11, 12];
+  return 1 - joints.reduce((s, i) => s + lm[i].x, 0) / joints.length;
+}
+
+// 사람이 화면에서 얼마나 크게 보이는지 (클수록 카메라에 가까이 있어요)
+function bodySize(lm) {
+  const shoulder = Math.abs(lm[11].x - lm[12].x);
+  const torso = Math.abs((lm[11].y + lm[12].y) / 2 - (lm[23].y + lm[24].y) / 2);
+  return Math.max(shoulder, torso);
+}
+
+// 찾은 사람들을 아이 자리에 나눠 줘요
+// - 한 명 모드: 가장 크게(가까이) 보이는 사람 (뒤에 선생님이 지나가도 헷갈리지 않게)
+// - 두 명 모드: 화면 왼쪽 = 🐯 호랑이팀, 오른쪽 = 🐦 까치팀
+function assignPlayers(list) {
+  if (!isDuo()) {
+    return [list.length ? list.reduce((a, b) => (bodySize(b) > bodySize(a) ? b : a)) : null];
+  }
+  const sorted = [...list].sort((a, b) => screenX(a) - screenX(b));
+  if (sorted.length >= 2) return [sorted[0], sorted[sorted.length - 1]];
+  if (sorted.length === 1) return screenX(sorted[0]) < 0.5 ? [sorted[0], null] : [null, sorted[0]];
+  return [null, null];
 }
 
 function tick() {
@@ -995,37 +1104,46 @@ function tick() {
   const cam = el.camVideo;
   if (cam.readyState >= 2 && now - S.lastCamDetect >= DETECT_MS) {
     S.lastCamDetect = now;
-    onChildPose(detect(S.models.cam, cam, now), now);
+    onChildPoses(detectPoses(S.models.cam, cam, now), now);
   }
   // 댄서를 볼 화면: 내 영상이면 영상 그 자체, 유튜브면 화면 공유로 받은 영상
   const src = media.kind === 'file' ? el.danceVideo : S.capture ? el.captureVideo : null;
   if (src && S.phase === 'playing' && media.advancing() && src.readyState >= 2 && now - S.lastVidDetect >= DETECT_MS) {
     S.lastVidDetect = now;
-    onDancerPose(detect(S.models.vid, src, now), media.time(), src);
+    onDancerPose(detectPoses(S.models.vid, src, now)[0] || null, media.time(), src);
   }
   if (S.phase === 'ready' && S.readyStep === 'body') updateReady(dt);
   if (S.phase === 'playing') updatePlaying(dt);
 }
 
-// 카메라 속 아이의 자세가 들어왔을 때
-function onChildPose(lm, now) {
-  drawSkeleton(el.camCanvas, el.camVideo, lm, S.childColor);
-  S.lastChild = lm;
+// 카메라에서 아이들의 자세가 들어왔을 때
+function onChildPoses(list, now) {
+  const assigned = assignPlayers(list);
+  // 한 명일 때는 판정 색, 두 명일 때는 팀 색으로 뼈대를 그려요
+  drawSkeletons(el.camCanvas, el.camVideo,
+    assigned.map((lm, i) => ({ lm, color: isDuo() ? TEAMS[i].color : S.players[0].color })), isDuo());
+  assigned.forEach((lm, i) => { S.players[i].lm = lm; });
   if (S.phase !== 'playing' || !media.advancing()) return;
 
-  const pose = lm ? makePose(lm, el.camVideo.videoWidth / el.camVideo.videoHeight) : null;
-  if (!pose || pose.armCount < 2) { S.prevChild = null; return; }
+  const vt = media.time();
+  assigned.forEach((lm, i) => scoreChildFrame(S.players[i], lm, now, vt));
+}
 
-  const w = S.win;
+// 아이 한 명의 이번 순간 자세를 채점 기록에 더해요
+function scoreChildFrame(P, lm, now, vt) {
+  const { videoWidth: cw, videoHeight: ch } = el.camVideo;
+  const pose = lm ? makePose(lm, cw && ch ? cw / ch : 16 / 9) : null; // 화면 크기를 아직 모르면 16:9로 봐요
+  if (!pose || pose.armCount < 2) { P.prevChild = null; return; }
+
+  const w = P.win;
   w.childFrames++;
-  if (S.prevChild) {
-    const sp = moveSpeed(S.prevChild.pose, pose, (now - S.prevChild.time) / 1000);
+  if (P.prevChild) {
+    const sp = moveSpeed(P.prevChild.pose, pose, (now - P.prevChild.time) / 1000);
     if (sp !== null) { w.childEnergy += sp; w.childEnergyN++; }
   }
-  S.prevChild = { pose, time: now };
+  P.prevChild = { pose, time: now };
 
   // 최근 1초 동안의 댄서 자세 중 가장 비슷한 것과 비교 (조금 늦게 따라 해도 괜찮아요)
-  const vt = media.time();
   let best = null;
   for (const d of S.dancerHist) {
     if (d.t < vt - LAG_WINDOW || d.t > vt + 0.1) continue;
@@ -1038,7 +1156,7 @@ function onChildPose(lm, now) {
 // 댄스 영상 속 댄서의 자세가 들어왔을 때
 function onDancerPose(lm, vt, src) {
   if (S.settings.debug) {
-    if (media.kind === 'file') drawSkeleton(el.danceCanvas, el.danceVideo, lm, '#ffe14d');
+    if (media.kind === 'file') drawSkeletons(el.danceCanvas, el.danceVideo, [{ lm, color: '#ffe14d' }]);
     S.debugDancer = lm ? '댄서 인식 ✅' : '댄서 인식 ❌ (움직임으로 채점)';
     $('debug-badge').textContent = S.debugDancer;
   }
@@ -1050,20 +1168,24 @@ function onDancerPose(lm, vt, src) {
 
   if (S.prevDancer) {
     const sp = moveSpeed(S.prevDancer.pose, pose, vt - S.prevDancer.t);
-    if (sp !== null) { S.win.dancerEnergy += sp; S.win.dancerEnergyN++; }
+    if (sp !== null) { S.dancerWin.sum += sp; S.dancerWin.n++; }
   }
   S.prevDancer = { pose, t: vt };
 }
 
-// 시작 전: 아이 몸이 잘 보이는지 확인
+// 시작 전: 아이(들) 몸이 잘 보이는지 확인
 function updateReady(dt) {
-  const lm = S.lastChild;
-  const visible = !!lm && [11, 12, 23, 24].every((i) => (lm[i].visibility ?? 0) >= 0.6);
-  S.readyTime = visible ? S.readyTime + dt : Math.max(0, S.readyTime - dt * 2);
+  const seen = S.players.map((P) => !!P.lm);
+  const visible = S.players.map((P) => !!P.lm && [11, 12, 23, 24].every((i) => (P.lm[i].visibility ?? 0) >= 0.6));
+  const allVisible = visible.every(Boolean);
+  S.readyTime = allVisible ? S.readyTime + dt : Math.max(0, S.readyTime - dt * 2);
   $('ready-fill').style.width = clamp(S.readyTime / READY_HOLD, 0, 1) * 100 + '%';
-  $('ready-msg').textContent = !lm
-    ? '카메라에 내 모습이 보이게 서 주세요!'
-    : visible ? '좋아요! 곧 시작해요 😊' : '한 걸음 뒤로 가 볼까요? 👣';
+  let msg;
+  if (allVisible) msg = '좋아요! 곧 시작해요 😊';
+  else if (!isDuo()) msg = seen[0] ? '한 걸음 뒤로 가 볼까요? 👣' : '카메라에 내 모습이 보이게 서 주세요!';
+  else if (!seen.some(Boolean)) msg = '두 친구 모두 카메라에 보이게 서 주세요!';
+  else msg = TEAMS.map((t, i) => `${t.emoji} ${visible[i] ? '✅' : '👀'}`).join('   ') + '   양쪽에 한 명씩, 한 걸음 뒤로!';
+  $('ready-msg').textContent = msg;
   if (S.readyTime >= READY_HOLD) beginDancing();
 }
 
@@ -1085,20 +1207,30 @@ function updatePlaying(dt) {
     judgeWindow();
     S.winStart += JUDGE_INTERVAL;
     if (vt - S.winStart >= JUDGE_INTERVAL) S.winStart = vt; // 너무 밀리면 다시 맞춤
-    S.win = newWindow();
+    resetWindows();
   }
 }
 
+// 1.5초마다: 아이마다 따로 판정해요
 function judgeWindow() {
-  const w = S.win;
   const th = DIFFICULTY[S.settings.difficulty] || DIFFICULTY.easy;
+  const dancerEnergy = S.dancerWin.n ? S.dancerWin.sum / S.dancerWin.n : 0;
+  const results = S.players.map((P) => judgePlayer(P.win, th, dancerEnergy));
+  if (S.settings.debug) {
+    $('debug-badge').textContent = `${S.debugDancer} · 이번 점수 ${results.map((r) => r.score.toFixed(2)).join(' / ')}`;
+  }
+  results.forEach((r, i) => applyJudge(S.players[i], r.kind, i));
+  afterJudge(results.map((r) => r.kind));
+}
+
+// 아이 한 명의 1.5초 기록 → 판정 종류와 0~1 점수
+function judgePlayer(w, th, dancerEnergy) {
   let kind, score = 0;
 
   if (w.childFrames < 2) {
     kind = 'away';
   } else {
     const childEnergy = w.childEnergyN ? w.childEnergy / w.childEnergyN : 0;
-    const dancerEnergy = w.dancerEnergyN ? w.dancerEnergy / w.dancerEnergyN : 0;
     if (w.poseScores.length >= 3) {
       // 잘 따라 한 순간들(상위 절반)의 평균 → 아이들에게 너그럽게
       const sorted = [...w.poseScores].sort((a, b) => b - a);
@@ -1113,36 +1245,43 @@ function judgeWindow() {
     }
     kind = score >= th.perfect ? 'perfect' : score >= th.great ? 'great' : score >= th.good ? 'good' : 'miss';
   }
-  if (S.settings.debug) $('debug-badge').textContent = `${S.debugDancer} · 이번 점수 ${score.toFixed(2)}`;
-  applyJudge(kind);
+  return { kind, score };
 }
 
-function applyJudge(kind) {
+// 아이 한 명의 판정을 점수판과 판정 글자에 보여 줘요
+function applyJudge(P, kind, i) {
   const J = JUDGES[kind];
-  S.judged++;
-  S.score += J.points;
-  S.counts[kind === 'away' ? 'miss' : kind]++;
-  S.combo = J.points > 0 ? S.combo + 1 : 0;
-  S.maxCombo = Math.max(S.maxCombo, S.combo);
-  S.childColor = J.color;
+  P.judged++;
+  P.score += J.points;
+  P.counts[kind === 'away' ? 'miss' : kind]++;
+  P.combo = J.points > 0 ? P.combo + 1 : 0;
+  P.maxCombo = Math.max(P.maxCombo, P.combo);
+  P.color = J.color;
 
-  const scoreEl = $('hud-score');
-  scoreEl.textContent = S.score.toLocaleString();
+  const scoreEl = $('score-' + i);
+  scoreEl.textContent = P.score.toLocaleString();
   if (J.points > 0) restartAnim(scoreEl, 'bump');
 
-  el.judge.className = 'judge ' + kind;
-  el.judge.querySelector('.judge-emoji').textContent = J.emoji;
-  el.judge.querySelector('.judge-text').textContent = J.text;
-  el.judge.querySelector('.judge-points').textContent = J.points ? '+' + J.points : '';
-  restartAnim(el.judge, 'show');
+  const judge = el.judges[i];
+  judge.className = judge.dataset.base + ' ' + kind;
+  judge.querySelector('.judge-emoji').textContent = J.emoji;
+  judge.querySelector('.judge-text').textContent = J.text;
+  judge.querySelector('.judge-points').textContent = J.points ? '+' + J.points : '';
+  restartAnim(judge, 'show');
+}
 
-  $('buddy-bubble').textContent = J.buddy;
-  $('combo').textContent = S.combo >= 3 ? `${S.combo} 콤보! 🔥` : '';
-  if (J.points > 0) restartAnim($('buddy-mascot'), 'happy');
+// 판정이 끝난 뒤: 호랑이 말풍선·콤보·효과음 (두 명이면 더 잘한 쪽 기준으로 한 번만)
+function afterJudge(kinds) {
+  const top = kinds.reduce((a, b) => (RANK[b] > RANK[a] ? b : a));
+  $('buddy-bubble').textContent = JUDGES[top].buddy;
+  $('combo').textContent = isDuo()
+    ? S.players.filter((P) => P.combo >= 3).map((P) => `${P.team.emoji} ${P.combo}콤보`).join(' · ') + (S.players.some((P) => P.combo >= 3) ? ' 🔥' : '')
+    : S.players[0].combo >= 3 ? `${S.players[0].combo} 콤보! 🔥` : '';
+  if (JUDGES[top].points > 0) restartAnim($('buddy-mascot'), 'happy');
 
-  if (kind === 'perfect') { beep(880, 0.1); setTimeout(() => beep(1320, 0.15), 90); }
-  else if (kind === 'great') beep(784, 0.12);
-  else if (kind === 'good') beep(659, 0.1);
+  if (top === 'perfect') { beep(880, 0.1); setTimeout(() => beep(1320, 0.15), 90); }
+  else if (top === 'great') beep(784, 0.12);
+  else if (top === 'good') beep(659, 0.1);
 }
 
 function restartAnim(node, cls) {
@@ -1160,38 +1299,68 @@ function onVideoEnded() {
 /* =========================================================
    결과 화면
    ========================================================= */
+// 끝까지 춤추면 별 1개는 꼭 받아요
+function starsOf(P) {
+  const pct = P.judged ? P.score / (P.judged * 100) : 0;
+  return pct >= 0.7 ? 3 : pct >= 0.4 ? 2 : 1;
+}
+
+function breakdownChips(P) {
+  return [
+    `🌟 최고야 ${P.counts.perfect}`,
+    `👏 잘했어 ${P.counts.great}`,
+    `🙂 좋아 ${P.counts.good}`,
+    `💪 다시 해봐 ${P.counts.miss}`,
+    `🔥 최대 콤보 ${P.maxCombo}`,
+  ].map((t) => `<span class="chip">${t}</span>`).join('');
+}
+
 function finishGame() {
   setPhase('ended');
   stopLoop();
   const song = S.song;
-  const pct = S.judged ? S.score / (S.judged * 100) : 0;
-  const stars = pct >= 0.7 ? 3 : pct >= 0.4 ? 2 : 1; // 끝까지 춤추면 별 1개는 꼭 받아요
+  const stars = S.players.map(starsOf);
 
-  const isRecord = S.score > 0 && S.score > (S.best[song.id] || 0);
-  if (isRecord) { S.best[song.id] = S.score; saveJSON('hoya-best', S.best); }
+  // 최고 점수: 두 명이면 더 높은 점수로 기록해요
+  const top = S.players.reduce((a, b) => (b.score > a.score ? b : a));
+  const isRecord = top.score > 0 && top.score > (S.best[song.id] || 0);
+  if (isRecord) { S.best[song.id] = top.score; saveJSON('hoya-best', S.best); }
 
   $('result-stage').textContent = `📍 ${song.stage} · ${song.title}`;
-  document.querySelectorAll('#stars span').forEach((s, i) => {
-    s.classList.toggle('on', i < stars);
-    s.style.animationDelay = i * 0.25 + 's';
-  });
-  $('result-msg').textContent = {
-    3: '우와! 최고의 댄스왕이에요! 👑',
-    2: '정말 잘했어요! 짝짝짝 👏',
-    1: '멋지게 춤췄어요! 다음엔 더 잘할 수 있어요 💪',
-  }[stars];
-  $('result-score').textContent = S.score.toLocaleString();
-  $('new-record').hidden = !isRecord;
-  $('breakdown').innerHTML = [
-    `🌟 최고야 ${S.counts.perfect}`,
-    `👏 잘했어 ${S.counts.great}`,
-    `🙂 좋아 ${S.counts.good}`,
-    `💪 다시 해봐 ${S.counts.miss}`,
-    `🔥 최대 콤보 ${S.maxCombo}`,
-  ].map((t) => `<span class="chip">${t}</span>`).join('');
+  $('stars').hidden = isDuo();
+  $('result-solo').hidden = isDuo();
+  $('result-duo').hidden = !isDuo();
+
+  if (!isDuo()) {
+    const P = S.players[0];
+    document.querySelectorAll('#stars span').forEach((s, i) => {
+      s.classList.toggle('on', i < stars[0]);
+      s.style.animationDelay = i * 0.25 + 's';
+    });
+    $('result-msg').textContent = {
+      3: '우와! 최고의 댄스왕이에요! 👑',
+      2: '정말 잘했어요! 짝짝짝 👏',
+      1: '멋지게 춤췄어요! 다음엔 더 잘할 수 있어요 💪',
+    }[stars[0]];
+    $('result-score').textContent = P.score.toLocaleString();
+    $('new-record').hidden = !isRecord;
+    $('breakdown').innerHTML = breakdownChips(P);
+  } else {
+    // 두 명: 이긴 사람·진 사람 없이 둘 다 칭찬해요
+    $('result-msg').textContent = '둘 다 정말 멋지게 춤췄어요! 👏👏';
+    const praise = { 3: '최고의 댄스왕! 👑', 2: '정말 잘했어요! 👏', 1: '멋지게 췄어요! 💪' };
+    $('result-duo').innerHTML = S.players.map((P, i) => `
+      <div class="result-player" style="--team:${P.team.color}">
+        <div class="rp-team">${P.team.emoji} ${P.team.name}</div>
+        <div class="stars small">${[0, 1, 2].map((k) => `<span class="${k < stars[i] ? 'on' : ''}" style="animation-delay:${k * 0.25}s">★</span>`).join('')}</div>
+        <div class="rp-praise">${praise[stars[i]]}</div>
+        <div class="rp-score"><span>${P.score.toLocaleString()}</span>점${isRecord && P === top ? ' <span class="new-record">🎉 새 기록!</span>' : ''}</div>
+        <div class="breakdown small">${breakdownChips(P)}</div>
+      </div>`).join('');
+  }
 
   showScreen('result');
-  launchConfetti(stars);
+  launchConfetti(Math.max(...stars));
   beep(523, 0.15); setTimeout(() => beep(659, 0.15), 150); setTimeout(() => beep(784, 0.3), 300);
 }
 
@@ -1273,6 +1442,11 @@ function bindUI() {
 
   document.querySelectorAll('#difficulty button').forEach((b) => b.addEventListener('click', () => {
     S.settings.difficulty = b.dataset.value;
+    saveSettings();
+    renderSettings();
+  }));
+  document.querySelectorAll('#players-seg button').forEach((b) => b.addEventListener('click', () => {
+    S.settings.players = Number(b.dataset.value);
     saveSettings();
     renderSettings();
   }));

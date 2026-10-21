@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap" rel="stylesheet">
   <!-- ?v= 뒤 숫자: 파일을 고칠 때마다 바꿔야 브라우저가 예전 파일 대신 새 파일을 불러와요 -->
-  <link rel="stylesheet" href="style.css?v=20261014">
+  <link rel="stylesheet" href="style.css?v=20261021c">
 </head>
 <body>
   <div class="saekdong"></div>
@@ -36,6 +36,13 @@
       <div class="song-grid" id="song-grid"></div>
 
       <div class="settings">
+        <div class="setting">
+          <span class="setting-label">인원</span>
+          <div class="segmented" id="players-seg">
+            <button data-value="1">🐯 1명</button>
+            <button data-value="2">🐯🐦 2명</button>
+          </div>
+        </div>
         <div class="setting">
           <span class="setting-label">난이도</span>
           <div class="segmented" id="difficulty">
@@ -67,22 +74,17 @@
           <div class="bar" title="노래 진행"><div class="fill" id="progress-fill"></div></div>
           <div class="bar beat" title="다음 판정까지"><div class="fill" id="beat-fill"></div></div>
         </div>
-        <div class="hud-score"><small>점수</small><span id="hud-score">0</span></div>
+        <div class="hud-scores" id="hud-scores"></div>
       </div>
 
+      <!-- 넓은 화면: [댄스 영상 | 카메라] 나란히, 세로로 긴 화면: 위아래 (style.css 참고) -->
       <div class="stage">
-        <!-- 왼쪽: 따라 할 댄스 영상 -->
+        <!-- 따라 할 댄스 영상 -->
         <div class="video-box" id="video-box">
           <video id="dance-video" playsinline preload="auto"></video>
           <canvas id="dance-canvas"></canvas>
           <div class="yt-wrap" id="yt-wrap"><div id="yt-player"></div></div>
           <div class="debug-badge" id="debug-badge" hidden></div>
-
-          <div class="judge" id="judge">
-            <div class="judge-emoji"></div>
-            <div class="judge-text"></div>
-            <div class="judge-points"></div>
-          </div>
 
           <div class="ready-panel" id="ov-ready">
             <!-- 유튜브 영상일 때: 화면 공유로 채점 준비 -->
@@ -100,26 +102,36 @@
             <div class="ready-step" id="ready-body">
               <div class="ready-emoji">🙆</div>
               <h3 id="ready-msg">카메라에 내 모습이 보이게 서 주세요!</h3>
-              <p>머리부터 무릎까지 보이면 저절로 시작해요</p>
+              <p id="ready-sub">머리부터 무릎까지 보이면 저절로 시작해요</p>
               <div class="ready-bar"><div class="fill" id="ready-fill"></div></div>
               <button class="btn btn-primary" id="btn-skip-ready">바로 시작 ▶</button>
             </div>
           </div>
         </div>
 
-        <!-- 오른쪽: 내 모습 + 호랑이 친구 -->
-        <div class="side">
-          <div class="cam-box">
-            <video id="cam-video" playsinline muted></video>
-            <canvas id="cam-canvas"></canvas>
-            <div class="cam-label">나의 춤 🪞</div>
+        <!-- 내 모습 (댄스 영상과 같은 크기). 판정 글자는 아이 모습 위에 떠요 -->
+        <div class="cam-box" id="cam-box">
+          <video id="cam-video" playsinline muted></video>
+          <canvas id="cam-canvas"></canvas>
+          <div class="cam-label" id="cam-label">나의 춤 🪞</div>
+          <!-- 두 명일 때만 보여요: 왼쪽 호랑이팀, 오른쪽 까치팀 -->
+          <div class="cam-team left">🐯</div>
+          <div class="cam-team right">🐦</div>
+
+          <div class="judge" id="judge">
+            <div class="judge-team"></div>
+            <div class="judge-emoji"></div>
+            <div class="judge-text"></div>
+            <div class="judge-points"></div>
           </div>
-          <div class="buddy" id="buddy">
-            <div class="buddy-mascot" id="buddy-mascot">🐯</div>
-            <div class="buddy-bubble" id="buddy-bubble">같이 춤춰요!</div>
-            <div class="combo" id="combo"></div>
-            <div class="score-mode" id="score-mode"></div>
-          </div>
+        </div>
+
+        <!-- 호랑이 친구: 말풍선·콤보·채점 방식 -->
+        <div class="buddy" id="buddy">
+          <div class="buddy-mascot" id="buddy-mascot">🐯</div>
+          <div class="buddy-bubble" id="buddy-bubble">같이 춤춰요!</div>
+          <div class="combo" id="combo"></div>
+          <div class="score-mode" id="score-mode"></div>
         </div>
       </div>
 
@@ -175,11 +187,16 @@
         <div class="result-stage" id="result-stage"></div>
         <div class="stars" id="stars"><span>★</span><span>★</span><span>★</span></div>
         <h2 id="result-msg"></h2>
-        <div class="result-score">
-          <span id="result-score">0</span>점
-          <span class="new-record" id="new-record" hidden>🎉 새 기록!</span>
+        <!-- 한 명일 때 -->
+        <div class="result-solo" id="result-solo">
+          <div class="result-score">
+            <span id="result-score">0</span>점
+            <span class="new-record" id="new-record" hidden>🎉 새 기록!</span>
+          </div>
+          <div class="breakdown" id="breakdown"></div>
         </div>
-        <div class="breakdown" id="breakdown"></div>
+        <!-- 두 명일 때: 팀마다 따로 칭찬 -->
+        <div class="result-duo" id="result-duo" hidden></div>
         <div class="result-buttons">
           <button class="btn btn-primary" id="btn-retry">🔁 다시 하기</button>
           <button class="btn" id="btn-other">🎵 다른 노래</button>
@@ -193,6 +210,6 @@
 
   <!-- 화면 공유로 받은 유튜브 영상 (눈에 안 보이게 두고 댄서 인식에만 써요) -->
   <video id="capture-video" class="capture-video" muted playsinline></video>
-  <script src="game.js?v=20261014"></script>
+  <script src="game.js?v=20261021c"></script>
 </body>
 </html>
