@@ -126,6 +126,7 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const el = {
   danceVideo: $('dance-video'), danceCanvas: $('dance-canvas'),
   camVideo: $('cam-video'), camCanvas: $('cam-canvas'),
+  camVideo2: $('cam-video-2'), camCanvas2: $('cam-canvas-2'),
   captureVideo: $('capture-video'),
   videoBox: $('video-box'),
   judges: [$('judge')],   // 판정 글자 (두 명이면 2개)
@@ -138,12 +139,16 @@ const S = {
   runId: 0,
   countToken: 0,
   raf: 0,
-  lastTick: 0, lastCamDetect: 0, lastVidDetect: 0,
+  lastTick: 0, lastCamDetect: [0, 0], lastVidDetect: 0,
   camStream: null,
+  camStream2: null,       // 카메라 두 대일 때 두 번째(까치팀) 카메라
+  twoCams: false,         // 이번 판에 카메라 두 대를 쓰는지
+  camNote: '',            // 카메라 두 대를 못 켰을 때 안내 문구
   capture: null,          // 화면 공유 { stream, track }
   models: null,           // { cam, vid } 자세 인식기 2개 (카메라용, 영상용)
   modelPromise: null,
-  settings: { difficulty: 'easy', flip: false, debug: false, players: 1, source: {}, yt: {} },
+  // camMode: 두 명일 때 카메라 'one'(한 대로 같이) / 'two'(두 대로 따로), camOrder: 두 대일 때 [호랑이팀, 까치팀] 카메라 번호
+  settings: { difficulty: 'easy', flip: false, debug: false, players: 1, camMode: 'one', camOrder: [], source: {}, yt: {} },
   videos: {},             // 노래 id → { blob, name, url }  (영상 넣기로 고른 영상)
   fixed: {},              // 노래 id → videos 폴더에서 찾은 영상 주소 (없으면 null)
   best: {},
@@ -216,7 +221,8 @@ async function loadStoredVideos() {
 }
 // 고정 곡(소다팝·골든)의 영상이 videos 폴더에 있는지 찾아봐요
 async function findFixedVideos() {
-  if (location.protocol === 'file:') return; // 파일로 직접 열면 폴더를 확인할 수 없어요
+  // videos 폴더는 이 맥에서 열 때(localhost)만 있어요. 인터넷 주소에서는 찾지 않아요
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return;
   await Promise.all(SONGS.filter((s) => s.fixedFile).map(async (song) => {
     S.fixed[song.id] = null;
     for (const ext of VIDEO_EXTS) {
@@ -377,6 +383,14 @@ function renderSettings() {
   document.querySelectorAll('#players-seg button').forEach((b) => {
     b.classList.toggle('active', Number(b.dataset.value) === S.settings.players);
   });
+  // 카메라 설정은 2명일 때만 보여요. 아이패드에서는 '두 대로 따로'를 쓸 수 없어요
+  $('cam-setting').hidden = S.settings.players !== 2;
+  document.querySelectorAll('#cam-seg button').forEach((b) => {
+    const two = b.dataset.value === 'two';
+    b.disabled = two && !twoCamsSupported();
+    b.title = b.disabled ? '아이패드에서는 카메라를 한 대만 쓸 수 있어요' : '';
+    b.classList.toggle('active', b.dataset.value === (twoCamsSupported() ? S.settings.camMode : 'one'));
+  });
   $('opt-flip').checked = S.settings.flip;
   $('opt-debug').checked = S.settings.debug;
 }
@@ -407,17 +421,19 @@ function ensureModels() {
       });
       // 카메라용·영상용 인식기를 따로 만들어요 (서로 섞이지 않게)
       // 카메라는 아이를 최대 2명까지 찾고, 영상은 댄서 1명만 찾아요
-      let cam = null, vid = null;
+      let cam = null, vid = null, delegate = 'GPU';
       try {
         cam = await make('GPU', 2);
         vid = await make('GPU', 1);
       } catch (e) {
         console.warn('GPU로 실행할 수 없어 CPU로 바꿔요', e);
         if (cam) cam.close();
+        delegate = 'CPU';
         cam = await make('CPU', 2);
         vid = await make('CPU', 1);
       }
-      S.models = { cam, vid };
+      // cam2: 카메라 두 대일 때만 필요해서 나중에 만들어요 (ensureCam2Model)
+      S.models = { cam, vid, cam2: null, makeCam: () => make(delegate, 2) };
     })().catch((e) => {
       S.modelPromise = null;
       console.error(e);
@@ -449,6 +465,98 @@ function stopCamera() {
   if (S.camStream) S.camStream.getTracks().forEach((t) => t.stop());
   S.camStream = null;
   el.camVideo.srcObject = null;
+  stopCamera2();
+}
+
+function stopCamera2() {
+  if (S.camStream2) S.camStream2.getTracks().forEach((t) => t.stop());
+  S.camStream2 = null;
+  el.camVideo2.srcObject = null;
+}
+
+/* ---------- 카메라 두 대로 따로 (2명 모드) ---------- */
+// 아이패드·아이폰 사파리는 카메라를 한 번에 한 대만 켤 수 있어요
+function twoCamsSupported() {
+  const ua = navigator.userAgent;
+  const iOS = /iPad|iPhone|iPod/.test(ua) || (ua.includes('Macintosh') && navigator.maxTouchPoints > 1);
+  return !iOS && !!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices);
+}
+const twoCamsWanted = () => S.settings.players === 2 && S.settings.camMode === 'two' && twoCamsSupported();
+const deviceIdOf = (stream) => (stream && stream.getVideoTracks()[0] ? stream.getVideoTracks()[0].getSettings().deviceId : '');
+
+function openCamera(deviceId) {
+  return navigator.mediaDevices.getUserMedia({
+    video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false,
+  });
+}
+
+async function playVideoEl(v) {
+  await v.play().catch(() => {});
+  if (v.readyState < 2) await new Promise((resolve) => v.addEventListener('loadeddata', resolve, { once: true }));
+}
+
+// 카메라 준비: 두 대로 따로가 안 되면(카메라가 1대뿐 등) 알아서 한 대로 같이 해요
+async function ensureCameras() {
+  S.camNote = '';
+  S.twoCams = false;
+  await ensureCamera(); // 먼저 한 대를 켜서 허락을 받아요 (그래야 카메라 목록을 볼 수 있어요)
+  if (!twoCamsWanted()) { stopCamera2(); return; }
+
+  const ids = (await navigator.mediaDevices.enumerateDevices())
+    .filter((d) => d.kind === 'videoinput' && d.deviceId).map((d) => d.deviceId);
+  if (ids.length < 2) {
+    stopCamera2();
+    S.camNote = '📷 카메라가 1대만 연결되어 있어서, 한 대로 같이 해요.';
+    return;
+  }
+  // [호랑이팀, 까치팀] 카메라: 지난번에 정한 순서가 있으면 그대로
+  const order = (S.settings.camOrder || []).filter((id) => ids.includes(id));
+  for (const id of ids) if (order.length < 2 && !order.includes(id)) order.push(id);
+
+  try {
+    if (deviceIdOf(S.camStream) !== order[0]) {
+      stopCamera();
+      S.camStream = await openCamera(order[0]);
+      el.camVideo.srcObject = S.camStream;
+    }
+    if (deviceIdOf(S.camStream2) !== order[1]) {
+      stopCamera2();
+      S.camStream2 = await openCamera(order[1]);
+      el.camVideo2.srcObject = S.camStream2;
+    }
+    await Promise.all([playVideoEl(el.camVideo), playVideoEl(el.camVideo2)]);
+    await new Promise((r) => setTimeout(r, 300));
+    const live = (s) => s && s.getVideoTracks().every((t) => t.readyState === 'live');
+    if (!live(S.camStream) || !live(S.camStream2)) throw new Error('두 카메라를 동시에 켤 수 없어요');
+  } catch (e) {
+    console.warn('카메라 두 대 켜기 실패', e);
+    stopCamera();
+    await ensureCamera();
+    S.camNote = '📷 두 번째 카메라를 켤 수 없어서 한 대로 같이 해요. (웹캠을 컴퓨터의 다른 USB 구멍에 나눠 꽂아 보세요)';
+    return;
+  }
+  S.twoCams = true;
+  S.settings.camOrder = order.slice(0, 2);
+  saveSettings();
+}
+
+// 두 번째 카메라용 자세 인식기 (카메라마다 따로 있어야 서로 섞이지 않아요)
+async function ensureCam2Model() {
+  if (!S.models.cam2) S.models.cam2 = await S.models.makeCam();
+}
+
+// [↔ 카메라 서로 바꾸기]: 호랑이팀·까치팀 카메라를 맞바꿔요
+async function swapCameras() {
+  if (!S.twoCams) return;
+  [S.camStream, S.camStream2] = [S.camStream2, S.camStream];
+  el.camVideo.srcObject = S.camStream;
+  el.camVideo2.srcObject = S.camStream2;
+  await Promise.all([playVideoEl(el.camVideo), playVideoEl(el.camVideo2)]);
+  S.settings.camOrder = [deviceIdOf(S.camStream), deviceIdOf(S.camStream2)];
+  saveSettings();
+  S.players.forEach((P) => { P.lm = null; P.prevChild = null; });
+  S.readyTime = 0;
 }
 
 function waitVideoReady() {
@@ -867,8 +975,10 @@ function renderHudScores() {
     </div>`).join('');
 }
 
-// 판정 글자 준비: 두 명이면 왼쪽(호랑이)·오른쪽(까치)에 하나씩
-function setupJudges(container) {
+// 판정 글자 준비: 아이 모습 위에 띄워요
+// - 카메라 한 대 + 두 명: 한 화면의 왼쪽(호랑이)·오른쪽(까치)에 하나씩
+// - 카메라 두 대: 각자 자기 카메라 화면 가운데에
+function setupJudges() {
   document.querySelectorAll('.judge.clone').forEach((n) => n.remove());
   const base = $('judge');
   el.judges = [base];
@@ -878,11 +988,22 @@ function setupJudges(container) {
     el.judges.push(copy);
   }
   el.judges.forEach((j, i) => {
-    j.dataset.base = 'judge' + (i > 0 ? ' clone' : '') + (isDuo() ? (i === 0 ? ' slot-left' : ' slot-right') : '');
+    const slot = isDuo() && !S.twoCams ? (i === 0 ? ' slot-left' : ' slot-right') : '';
+    j.dataset.base = 'judge' + (i > 0 ? ' clone' : '') + slot + (isDuo() ? ` team-${i}` : '');
     j.className = j.dataset.base;
     j.querySelector('.judge-team').textContent = isDuo() ? `${TEAMS[i].emoji} ${TEAMS[i].name}` : '';
-    container.appendChild(j);
+    $(S.twoCams && i === 1 ? 'cam-box-2' : 'cam-box').appendChild(j);
   });
+}
+
+// 카메라 한 대/두 대에 맞춰 화면 배치·이름표·판정 글자를 바꿔요
+function applyCamLayout() {
+  $('screen-play').classList.toggle('two-cams', S.twoCams);
+  $('cam-box-2').hidden = !S.twoCams;
+  $('cam-label').textContent = S.twoCams ? `${TEAMS[0].emoji} ${TEAMS[0].name}` : isDuo() ? '우리의 춤 🪞' : '나의 춤 🪞';
+  $('btn-swap-cams').hidden = !S.twoCams;
+  $('cam-note').textContent = S.camNote;
+  setupJudges();
 }
 
 function resetGame() {
@@ -896,10 +1017,9 @@ function resetGame() {
   resetWindows();
   renderHudScores();
   $('screen-play').classList.toggle('duo', isDuo());
-  $('cam-label').textContent = isDuo() ? '우리의 춤 🪞' : '나의 춤 🪞';
-  $('ready-sub').textContent = isDuo()
-    ? '왼쪽은 🐯 호랑이팀, 오른쪽은 🐦 까치팀! 머리부터 무릎까지 보이면 저절로 시작해요'
-    : '머리부터 무릎까지 보이면 저절로 시작해요';
+  $('ready-sub').textContent = !isDuo() ? '머리부터 무릎까지 보이면 저절로 시작해요'
+    : twoCamsWanted() ? '🐯 호랑이팀, 🐦 까치팀 각자 자기 카메라 앞에! 머리부터 무릎까지 보이면 저절로 시작해요'
+    : '왼쪽은 🐯 호랑이팀, 오른쪽은 🐦 까치팀! 머리부터 무릎까지 보이면 저절로 시작해요';
   $('progress-fill').style.width = '0%';
   $('beat-fill').style.width = '0%';
   $('combo').textContent = '';
@@ -929,7 +1049,10 @@ async function startSong(song) {
   el.videoBox.classList.toggle('flip', src !== 'youtube' && S.settings.flip);
   // 판정 글자는 카메라 화면(아이 모습) 위에 띄워요
   // (유튜브 영상을 가리지 않아서 화면 공유 채점도 방해하지 않아요)
-  setupJudges($('cam-box'));
+  // 카메라를 켜기 전에는 일단 한 대 배치로 보여 주고, 켠 뒤에 다시 맞춰요
+  S.twoCams = false;
+  S.camNote = '';
+  applyCamLayout();
   $('debug-badge').hidden = !S.settings.debug;
   if (src !== 'youtube') {
     el.danceVideo.src = fileUrl;
@@ -948,12 +1071,22 @@ async function startSong(song) {
     } else {
       prepare = waitVideoReady();
     }
-    await Promise.all([ensureModels(), ensureCamera(), prepare]);
+    await Promise.all([ensureModels(), ensureCameras(), prepare]);
   } catch (err) {
     if (runId === S.runId) showError(err);
     return;
   }
+  if (S.twoCams) {
+    try { await ensureCam2Model(); }
+    catch (e) {
+      console.warn('두 번째 인식기를 만들 수 없어요', e);
+      S.twoCams = false;
+      stopCamera2();
+      S.camNote = '📷 컴퓨터가 카메라 두 대를 감당하기 어려워서 한 대로 같이 해요.';
+    }
+  }
   if (runId !== S.runId || S.phase !== 'loading') return; // 그사이 그만두었으면 멈춤
+  applyCamLayout();
   updateScoreMode();
   showReadyStep(src === 'youtube' && !S.capture && captureSupported() ? 'capture' : 'body');
   setPhase('ready');
@@ -1081,13 +1214,16 @@ function bodySize(lm) {
   return Math.max(shoulder, torso);
 }
 
-// 찾은 사람들을 아이 자리에 나눠 줘요
-// - 한 명 모드: 가장 크게(가까이) 보이는 사람 (뒤에 선생님이 지나가도 헷갈리지 않게)
+// 가장 크게(가까이) 보이는 사람 (뒤에 선생님이 지나가도 헷갈리지 않게)
+function closestPose(list) {
+  return list.length ? list.reduce((a, b) => (bodySize(b) > bodySize(a) ? b : a)) : null;
+}
+
+// 카메라 한 대에서 찾은 사람들을 아이 자리에 나눠 줘요
+// - 한 명 모드: 가장 가까이 보이는 사람
 // - 두 명 모드: 화면 왼쪽 = 🐯 호랑이팀, 오른쪽 = 🐦 까치팀
 function assignPlayers(list) {
-  if (!isDuo()) {
-    return [list.length ? list.reduce((a, b) => (bodySize(b) > bodySize(a) ? b : a)) : null];
-  }
+  if (!isDuo()) return [closestPose(list)];
   const sorted = [...list].sort((a, b) => screenX(a) - screenX(b));
   if (sorted.length >= 2) return [sorted[0], sorted[sorted.length - 1]];
   if (sorted.length === 1) return screenX(sorted[0]) < 0.5 ? [sorted[0], null] : [null, sorted[0]];
@@ -1101,10 +1237,13 @@ function tick() {
   S.lastTick = now;
   if (!S.models) return;
 
-  const cam = el.camVideo;
-  if (cam.readyState >= 2 && now - S.lastCamDetect >= DETECT_MS) {
-    S.lastCamDetect = now;
-    onChildPoses(detectPoses(S.models.cam, cam, now), now);
+  // 카메라 인식: 두 대면 한 번에 한 대씩 번갈아 해서 컴퓨터 부담을 나눠요
+  const cams = S.twoCams && S.models.cam2 ? [el.camVideo, el.camVideo2] : [el.camVideo];
+  for (let c = 0; c < cams.length; c++) {
+    if (cams[c].readyState < 2 || now - S.lastCamDetect[c] < DETECT_MS) continue;
+    S.lastCamDetect[c] = now;
+    onCameraPoses(c, detectPoses(c === 0 ? S.models.cam : S.models.cam2, cams[c], now), now);
+    break;
   }
   // 댄서를 볼 화면: 내 영상이면 영상 그 자체, 유튜브면 화면 공유로 받은 영상
   const src = media.kind === 'file' ? el.danceVideo : S.capture ? el.captureVideo : null;
@@ -1116,7 +1255,20 @@ function tick() {
   if (S.phase === 'playing') updatePlaying(dt);
 }
 
-// 카메라에서 아이들의 자세가 들어왔을 때
+// 카메라(c번)에서 찾은 사람들이 들어왔을 때
+function onCameraPoses(c, list, now) {
+  if (!S.twoCams) { onChildPoses(list, now); return; }
+  // 카메라 두 대: 카메라마다 가장 가까이 보이는 아이 한 명 (0번 = 호랑이팀, 1번 = 까치팀)
+  const lm = closestPose(list);
+  const [video, canvas] = c === 0 ? [el.camVideo, el.camCanvas] : [el.camVideo2, el.camCanvas2];
+  drawSkeletons(canvas, video, [{ lm, color: TEAMS[c].color }]);
+  const P = S.players[c];
+  P.lm = lm;
+  if (S.phase !== 'playing' || !media.advancing()) return;
+  scoreChildFrame(P, lm, now, media.time(), video);
+}
+
+// 카메라 한 대에서 아이들의 자세가 들어왔을 때
 function onChildPoses(list, now) {
   const assigned = assignPlayers(list);
   // 한 명일 때는 판정 색, 두 명일 때는 팀 색으로 뼈대를 그려요
@@ -1130,8 +1282,8 @@ function onChildPoses(list, now) {
 }
 
 // 아이 한 명의 이번 순간 자세를 채점 기록에 더해요
-function scoreChildFrame(P, lm, now, vt) {
-  const { videoWidth: cw, videoHeight: ch } = el.camVideo;
+function scoreChildFrame(P, lm, now, vt, video = el.camVideo) {
+  const { videoWidth: cw, videoHeight: ch } = video;
   const pose = lm ? makePose(lm, cw && ch ? cw / ch : 16 / 9) : null; // 화면 크기를 아직 모르면 16:9로 봐요
   if (!pose || pose.armCount < 2) { P.prevChild = null; return; }
 
@@ -1184,7 +1336,10 @@ function updateReady(dt) {
   if (allVisible) msg = '좋아요! 곧 시작해요 😊';
   else if (!isDuo()) msg = seen[0] ? '한 걸음 뒤로 가 볼까요? 👣' : '카메라에 내 모습이 보이게 서 주세요!';
   else if (!seen.some(Boolean)) msg = '두 친구 모두 카메라에 보이게 서 주세요!';
-  else msg = TEAMS.map((t, i) => `${t.emoji} ${visible[i] ? '✅' : '👀'}`).join('   ') + '   양쪽에 한 명씩, 한 걸음 뒤로!';
+  else {
+    msg = TEAMS.map((t, i) => `${t.emoji} ${visible[i] ? '✅' : '👀'}`).join('   ')
+      + (S.twoCams ? '   각자 자기 카메라 앞에서 한 걸음 뒤로!' : '   양쪽에 한 명씩, 한 걸음 뒤로!');
+  }
   $('ready-msg').textContent = msg;
   if (S.readyTime >= READY_HOLD) beginDancing();
 }
@@ -1450,6 +1605,12 @@ function bindUI() {
     saveSettings();
     renderSettings();
   }));
+  document.querySelectorAll('#cam-seg button').forEach((b) => b.addEventListener('click', () => {
+    S.settings.camMode = b.dataset.value;
+    saveSettings();
+    renderSettings();
+  }));
+  $('btn-swap-cams').addEventListener('click', swapCameras);
   $('opt-flip').addEventListener('change', (e) => { S.settings.flip = e.target.checked; saveSettings(); });
   $('opt-debug').addEventListener('change', (e) => { S.settings.debug = e.target.checked; saveSettings(); });
 

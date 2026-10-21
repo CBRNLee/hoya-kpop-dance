@@ -548,6 +548,36 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 400; margin: 0; }
 .cam-team.right { right: 10px; border: 3px solid #2f80ed; }
 .duo .cam-team { display: block; }
 
+/* ---------- 카메라 두 대로 따로 ----------
+   넓은 화면: [댄스 영상(크게) | 🐯 카메라 / 🐦 카메라] , 세로 화면: 댄스 영상 아래에 카메라 두 개 나란히 */
+.cam-box-2 { grid-area: cam2; }
+.two-cams .stage {
+  grid-template-columns: 2fr 1fr;
+  grid-template-rows: auto auto auto;
+  grid-template-areas: "video cam" "video cam2" "buddy buddy";
+}
+.two-cams .video-box { align-self: center; }
+.two-cams .cam-box { width: min(100%, calc((100cqh - var(--buddy-h) - 28px) / 2 * 16 / 9)); }
+@media (max-aspect-ratio: 1 / 1) {
+  .two-cams .stage {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas: "video video" "cam cam2" "buddy buddy";
+  }
+  .two-cams .video-box { width: min(100%, calc((100cqh - var(--buddy-h) - 28px) * 2 / 3 * 16 / 9)); }
+  .two-cams .cam-box { width: min(100%, calc(((100cqh - var(--buddy-h) - 28px) * 2 / 3 * 16 / 9 - 14px) / 2)); }
+}
+.two-cams #cam-box { border-color: #e63946; }
+.two-cams #cam-box-2 { border-color: #2f80ed; }
+.two-cams .cam-team { display: none; }
+.two-cams .cam-box .judge-emoji { font-size: clamp(1.2rem, 9cqw, 3.5rem); }
+.two-cams .cam-box .judge-text { font-size: clamp(1.4rem, 14cqw, 5rem); }
+.two-cams .cam-box .judge-points { font-size: clamp(.9rem, 5cqw, 1.8rem); }
+.two-cams .cam-box .judge-team { font-size: clamp(.8rem, 5cqw, 1.3rem); }
+.judge.team-0 .judge-team { background: #e63946; }
+.judge.team-1 .judge-team { background: #2f80ed; }
+.cam-note { min-height: 0; color: var(--red) !important; }
+.cam-note:empty { display: none; }
+
 /* 결과 화면: 팀마다 따로 칭찬 (이긴 사람·진 사람 표시 없음) */
 .result-card:has(#result-duo:not([hidden])) { width: min(860px, 100%); }
 .result-solo { display: flex; flex-direction: column; align-items: center; gap: 14px; }

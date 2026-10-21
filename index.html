@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap" rel="stylesheet">
   <!-- ?v= 뒤 숫자: 파일을 고칠 때마다 바꿔야 브라우저가 예전 파일 대신 새 파일을 불러와요 -->
-  <link rel="stylesheet" href="style.css?v=20261021c">
+  <link rel="stylesheet" href="style.css?v=20261021e">
 </head>
 <body>
   <div class="saekdong"></div>
@@ -41,6 +41,14 @@
           <div class="segmented" id="players-seg">
             <button data-value="1">🐯 1명</button>
             <button data-value="2">🐯🐦 2명</button>
+          </div>
+        </div>
+        <!-- 2명일 때만 보여요 -->
+        <div class="setting" id="cam-setting" hidden>
+          <span class="setting-label">카메라</span>
+          <div class="segmented" id="cam-seg">
+            <button data-value="one">📷 한 대로 같이</button>
+            <button data-value="two">📷📷 두 대로 따로</button>
           </div>
         </div>
         <div class="setting">
@@ -104,7 +112,12 @@
               <h3 id="ready-msg">카메라에 내 모습이 보이게 서 주세요!</h3>
               <p id="ready-sub">머리부터 무릎까지 보이면 저절로 시작해요</p>
               <div class="ready-bar"><div class="fill" id="ready-fill"></div></div>
-              <button class="btn btn-primary" id="btn-skip-ready">바로 시작 ▶</button>
+              <p class="cam-note" id="cam-note"></p>
+              <div class="panel-buttons">
+                <button class="btn btn-primary" id="btn-skip-ready">바로 시작 ▶</button>
+                <!-- 카메라 두 대일 때만: 호랑이팀·까치팀 카메라가 바뀌었으면 -->
+                <button class="btn btn-small" id="btn-swap-cams" hidden>↔ 카메라 서로 바꾸기</button>
+              </div>
             </div>
           </div>
         </div>
@@ -124,6 +137,13 @@
             <div class="judge-text"></div>
             <div class="judge-points"></div>
           </div>
+        </div>
+
+        <!-- 카메라 두 대일 때만: 🐦 까치팀 카메라 -->
+        <div class="cam-box cam-box-2" id="cam-box-2" hidden>
+          <video id="cam-video-2" playsinline muted></video>
+          <canvas id="cam-canvas-2"></canvas>
+          <div class="cam-label">🐦 까치팀</div>
         </div>
 
         <!-- 호랑이 친구: 말풍선·콤보·채점 방식 -->
@@ -210,6 +230,6 @@
 
   <!-- 화면 공유로 받은 유튜브 영상 (눈에 안 보이게 두고 댄서 인식에만 써요) -->
   <video id="capture-video" class="capture-video" muted playsinline></video>
-  <script src="game.js?v=20261021c"></script>
+  <script src="game.js?v=20261021e"></script>
 </body>
 </html>
