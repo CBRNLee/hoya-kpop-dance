@@ -265,22 +265,18 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 400; margin: 0; }
 .hud-score span.bump { animation: bump .3s; }
 @keyframes bump { 50% { transform: scale(1.3); } }
 
-/* 춤추기 화면 배치
-   - 넓은 화면(노트북·TV·아이패드 가로): [댄스 영상 | 카메라] 같은 크기로 나란히, 호랑이 칸은 아래
-   - 세로로 긴 화면(아이패드 세로): 댄스 영상 → 카메라 → 호랑이 칸 위아래로 */
+/* 춤추기 화면 배치 — 아이들이 춤 영상에 집중하도록 영상을 크게
+   - 넓은 화면(노트북·TV·아이패드 가로): [춤 영상(약 2/3) | 오른쪽: 카메라 + 호랑이 칸]
+   - 세로로 긴 화면(아이패드 세로): 춤 영상을 위에 크게, 아래에 카메라와 호랑이 칸 나란히 */
 .stage {
-  --buddy-h: 92px;  /* 호랑이 칸 최소 높이 */
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: auto auto;
-  grid-template-areas: "video cam" "buddy buddy";
-  align-content: center; /* 남는 공간이 있으면 화면 가운데로 모아요 */
-  align-items: start;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "video cam" "video buddy";
   gap: 14px;
   padding: 14px;
-  container-type: size; /* 아래 cqh(화면 높이 기준 단위)를 쓰려고 */
 }
 
 .video-box, .cam-box {
@@ -289,22 +285,19 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 400; margin: 0; }
   border-radius: 20px;
   background: #111;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .3);
-  aspect-ratio: 16 / 9;
-  justify-self: center;
-  /* 칸 너비를 꽉 채우되, 높이가 모자라면 16:9를 지키며 작아져요 */
-  width: min(100%, calc((100cqh - var(--buddy-h) - 14px) * 16 / 9));
 }
 .video-box { grid-area: video; }
-.cam-box { grid-area: cam; }
+.cam-box { grid-area: cam; aspect-ratio: 16 / 9; }
 .buddy { grid-area: buddy; }
 
 @media (max-aspect-ratio: 1 / 1) {
   .stage {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto;
-    grid-template-areas: "video" "cam" "buddy";
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    grid-template-areas: "video video" "cam buddy";
+    align-content: start;
   }
-  .video-box, .cam-box { width: min(100%, calc((100cqh - var(--buddy-h) - 28px) / 2 * 16 / 9)); }
+  .video-box { aspect-ratio: 16 / 9; }
 }
 .video-box video, .video-box canvas,
 .cam-box video, .cam-box canvas {
@@ -340,18 +333,18 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 400; margin: 0; }
 }
 .buddy {
   position: relative;
-  min-height: var(--buddy-h);
+  min-height: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px 22px;
-  padding: 10px 16px;
+  gap: 8px;
+  padding: 12px;
   border-radius: 20px;
   background: rgba(255, 255, 255, .9);
   text-align: center;
 }
-.buddy-mascot { font-size: clamp(2.4rem, 4.5vw, 4rem); line-height: 1; }
+.buddy-mascot { font-size: clamp(3rem, 7vw, 6rem); line-height: 1; }
 .buddy-mascot.happy { animation: hop .5s; }
 @keyframes hop { 40% { transform: translateY(-24px) rotate(8deg) scale(1.1); } }
 .buddy-bubble { font-family: var(--font-title); font-size: clamp(1.2rem, 2.4vw, 2rem); }
@@ -408,11 +401,14 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 400; margin: 0; }
 .judge.good .judge-text { color: var(--good); }
 .judge.miss .judge-text, .judge.away .judge-text { color: var(--miss); }
 
-/* 판정 글자는 카메라 화면 위에 떠요 → 글자 크기를 카메라 화면 너비(cqw)에 맞춰요 */
-.cam-box, .video-box { container-type: inline-size; }
-.cam-box .judge-emoji { font-size: clamp(1.8rem, 9cqw, 4.5rem); }
-.cam-box .judge-text { font-size: clamp(2rem, 14cqw, 6.5rem); }
-.cam-box .judge-points { font-size: clamp(1.2rem, 5cqw, 2.2rem); }
+/* 시작 전 안내 글자 크기를 춤 영상 칸 너비(cqw)에 맞추려고 */
+.video-box { container-type: inline-size; }
+
+/* 유튜브 영상일 때: 판정 글자를 오른쪽 호랑이 칸에 띄워요 (영상을 가리면 화면 공유 채점이 방해받아서) */
+.buddy .judge { padding: 10px 22px; border-radius: 20px; background: rgba(255, 255, 255, .95); }
+.buddy .judge-text { font-size: clamp(2.2rem, 5vw, 4.5rem); }
+.buddy .judge-emoji { font-size: clamp(2rem, 4vw, 3.5rem); }
+.buddy .judge-points { color: var(--ink); text-shadow: none; }
 
 /* 시작 전 준비 안내 (영상 위에만 떠서 내 모습은 계속 보여요) */
 .ready-panel {
@@ -529,10 +525,12 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 400; margin: 0; }
 .judge-team:empty { display: none; }
 .judge.slot-left .judge-team { background: #e63946; }
 .judge.slot-right .judge-team { background: #2f80ed; }
-.duo .cam-box .judge-emoji { font-size: clamp(1.4rem, 6cqw, 3rem); }
-.duo .cam-box .judge-text { font-size: clamp(1.4rem, 7.5cqw, 3.6rem); -webkit-text-stroke-width: 3px; }
-.duo .cam-box .judge-points { font-size: clamp(1rem, 3.5cqw, 1.6rem); }
-.duo .cam-box .judge-team { font-size: clamp(.85rem, 3.2cqw, 1.3rem); }
+.duo .video-box .judge-text { font-size: clamp(2.2rem, 5.5vw, 5rem); }
+.duo .video-box .judge-emoji { font-size: clamp(2rem, 4vw, 3.5rem); }
+.duo .buddy .judge { padding: 6px 10px; }
+.duo .buddy .judge-text { font-size: clamp(1.3rem, 2.4vw, 2.2rem); -webkit-text-stroke-width: 2px; }
+.duo .buddy .judge-emoji { font-size: clamp(1.4rem, 2.4vw, 2.2rem); }
+.duo .buddy .judge-team { font-size: clamp(.8rem, 1.4vw, 1.1rem); }
 
 /* 카메라 화면 아래쪽 팀 표시 */
 .cam-team {
@@ -549,30 +547,27 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 400; margin: 0; }
 .duo .cam-team { display: block; }
 
 /* ---------- 카메라 두 대로 따로 ----------
-   넓은 화면: [댄스 영상(크게) | 🐯 카메라 / 🐦 카메라] , 세로 화면: 댄스 영상 아래에 카메라 두 개 나란히 */
+   넓은 화면: [춤 영상(크게) | 오른쪽: 🐯 카메라 / 🐦 카메라 / 호랑이 칸]
+   세로 화면: 춤 영상 아래에 🐯·🐦 카메라 나란히, 그 아래 호랑이 칸 */
 .cam-box-2 { grid-area: cam2; }
 .two-cams .stage {
-  grid-template-columns: 2fr 1fr;
-  grid-template-rows: auto auto auto;
-  grid-template-areas: "video cam" "video cam2" "buddy buddy";
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas: "video cam" "video cam2" "video buddy";
 }
-.two-cams .video-box { align-self: center; }
-.two-cams .cam-box { width: min(100%, calc((100cqh - var(--buddy-h) - 28px) / 2 * 16 / 9)); }
 @media (max-aspect-ratio: 1 / 1) {
   .two-cams .stage {
-    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto auto;
     grid-template-areas: "video video" "cam cam2" "buddy buddy";
   }
-  .two-cams .video-box { width: min(100%, calc((100cqh - var(--buddy-h) - 28px) * 2 / 3 * 16 / 9)); }
-  .two-cams .cam-box { width: min(100%, calc(((100cqh - var(--buddy-h) - 28px) * 2 / 3 * 16 / 9 - 14px) / 2)); }
 }
+/* 카메라가 두 개라 호랑이 칸이 작아요 → 호랑이와 말풍선을 옆으로 나란히 */
+.two-cams .buddy { flex-direction: row; flex-wrap: wrap; gap: 2px 12px; padding: 8px 10px; }
+.two-cams .buddy-mascot { font-size: clamp(2rem, 3.5vw, 3rem); }
+.two-cams .buddy-bubble { font-size: clamp(1rem, 1.8vw, 1.5rem); }
+.two-cams .score-mode { width: 100%; font-size: .8rem; }
 .two-cams #cam-box { border-color: #e63946; }
 .two-cams #cam-box-2 { border-color: #2f80ed; }
 .two-cams .cam-team { display: none; }
-.two-cams .cam-box .judge-emoji { font-size: clamp(1.2rem, 9cqw, 3.5rem); }
-.two-cams .cam-box .judge-text { font-size: clamp(1.4rem, 14cqw, 5rem); }
-.two-cams .cam-box .judge-points { font-size: clamp(.9rem, 5cqw, 1.8rem); }
-.two-cams .cam-box .judge-team { font-size: clamp(.8rem, 5cqw, 1.3rem); }
 .judge.team-0 .judge-team { background: #e63946; }
 .judge.team-1 .judge-team { background: #2f80ed; }
 .cam-note { min-height: 0; color: var(--red) !important; }

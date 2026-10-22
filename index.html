@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap" rel="stylesheet">
   <!-- ?v= 뒤 숫자: 파일을 고칠 때마다 바꿔야 브라우저가 예전 파일 대신 새 파일을 불러와요 -->
-  <link rel="stylesheet" href="style.css?v=20261021e">
+  <link rel="stylesheet" href="style.css?v=20261022b">
 </head>
 <body>
   <div class="saekdong"></div>
@@ -85,7 +85,7 @@
         <div class="hud-scores" id="hud-scores"></div>
       </div>
 
-      <!-- 넓은 화면: [댄스 영상 | 카메라] 나란히, 세로로 긴 화면: 위아래 (style.css 참고) -->
+      <!-- 넓은 화면: [춤 영상(크게) | 카메라·호랑이 칸], 세로로 긴 화면: 춤 영상 아래에 카메라·호랑이 칸 (style.css 참고) -->
       <div class="stage">
         <!-- 따라 할 댄스 영상 -->
         <div class="video-box" id="video-box">
@@ -93,6 +93,14 @@
           <canvas id="dance-canvas"></canvas>
           <div class="yt-wrap" id="yt-wrap"><div id="yt-player"></div></div>
           <div class="debug-badge" id="debug-badge" hidden></div>
+
+          <!-- 판정 글자 (유튜브 영상일 때는 호랑이 칸으로 옮겨요) -->
+          <div class="judge" id="judge">
+            <div class="judge-team"></div>
+            <div class="judge-emoji"></div>
+            <div class="judge-text"></div>
+            <div class="judge-points"></div>
+          </div>
 
           <div class="ready-panel" id="ov-ready">
             <!-- 유튜브 영상일 때: 화면 공유로 채점 준비 -->
@@ -122,7 +130,7 @@
           </div>
         </div>
 
-        <!-- 내 모습 (댄스 영상과 같은 크기). 판정 글자는 아이 모습 위에 떠요 -->
+        <!-- 내 모습 -->
         <div class="cam-box" id="cam-box">
           <video id="cam-video" playsinline muted></video>
           <canvas id="cam-canvas"></canvas>
@@ -130,13 +138,6 @@
           <!-- 두 명일 때만 보여요: 왼쪽 호랑이팀, 오른쪽 까치팀 -->
           <div class="cam-team left">🐯</div>
           <div class="cam-team right">🐦</div>
-
-          <div class="judge" id="judge">
-            <div class="judge-team"></div>
-            <div class="judge-emoji"></div>
-            <div class="judge-text"></div>
-            <div class="judge-points"></div>
-          </div>
         </div>
 
         <!-- 카메라 두 대일 때만: 🐦 까치팀 카메라 -->
@@ -230,6 +231,6 @@
 
   <!-- 화면 공유로 받은 유튜브 영상 (눈에 안 보이게 두고 댄서 인식에만 써요) -->
   <video id="capture-video" class="capture-video" muted playsinline></video>
-  <script src="game.js?v=20261021e"></script>
+  <script src="game.js?v=20261022b"></script>
 </body>
 </html>

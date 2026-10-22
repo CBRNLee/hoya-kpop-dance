@@ -975,9 +975,9 @@ function renderHudScores() {
     </div>`).join('');
 }
 
-// 판정 글자 준비: 아이 모습 위에 띄워요
-// - 카메라 한 대 + 두 명: 한 화면의 왼쪽(호랑이)·오른쪽(까치)에 하나씩
-// - 카메라 두 대: 각자 자기 카메라 화면 가운데에
+// 판정 글자 준비
+// - 컴퓨터 영상: 춤 영상 위에 / 유튜브 영상: 오른쪽 호랑이 칸에 (영상을 가리면 화면 공유 채점이 방해받아서)
+// - 두 명이면 왼쪽(🐯 호랑이)·오른쪽(🐦 까치)에 하나씩
 function setupJudges() {
   document.querySelectorAll('.judge.clone').forEach((n) => n.remove());
   const base = $('judge');
@@ -987,12 +987,13 @@ function setupJudges() {
     copy.removeAttribute('id');
     el.judges.push(copy);
   }
+  const container = media.kind === 'youtube' ? $('buddy') : el.videoBox;
   el.judges.forEach((j, i) => {
-    const slot = isDuo() && !S.twoCams ? (i === 0 ? ' slot-left' : ' slot-right') : '';
+    const slot = isDuo() ? (i === 0 ? ' slot-left' : ' slot-right') : '';
     j.dataset.base = 'judge' + (i > 0 ? ' clone' : '') + slot + (isDuo() ? ` team-${i}` : '');
     j.className = j.dataset.base;
     j.querySelector('.judge-team').textContent = isDuo() ? `${TEAMS[i].emoji} ${TEAMS[i].name}` : '';
-    $(S.twoCams && i === 1 ? 'cam-box-2' : 'cam-box').appendChild(j);
+    container.appendChild(j);
   });
 }
 
@@ -1047,9 +1048,7 @@ async function startSong(song) {
   $('hud-title').textContent = `${song.title} (${song.en})`;
   el.videoBox.classList.toggle('mode-youtube', src === 'youtube');
   el.videoBox.classList.toggle('flip', src !== 'youtube' && S.settings.flip);
-  // 판정 글자는 카메라 화면(아이 모습) 위에 띄워요
-  // (유튜브 영상을 가리지 않아서 화면 공유 채점도 방해하지 않아요)
-  // 카메라를 켜기 전에는 일단 한 대 배치로 보여 주고, 켠 뒤에 다시 맞춰요
+  // 카메라를 켜기 전에는 일단 한 대 배치로 보여 주고, 켠 뒤에 다시 맞춰요 (판정 글자 자리도 여기서 정해요)
   S.twoCams = false;
   S.camNote = '';
   applyCamLayout();
