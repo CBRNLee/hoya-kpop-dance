@@ -1075,13 +1075,16 @@ async function startSong(song) {
     if (runId === S.runId) showError(err);
     return;
   }
-  if (S.twoCams) {
+  // 두 번째 인식기: 카메라 두 대일 때, 그리고 카메라 한 대로 두 명이 할 때(화면 반쪽마다 한 명씩) 필요해요
+  if (isDuo()) {
     try { await ensureCam2Model(); }
     catch (e) {
       console.warn('두 번째 인식기를 만들 수 없어요', e);
-      S.twoCams = false;
-      stopCamera2();
-      S.camNote = '📷 컴퓨터가 카메라 두 대를 감당하기 어려워서 한 대로 같이 해요.';
+      if (S.twoCams) {
+        S.twoCams = false;
+        stopCamera2();
+        S.camNote = '📷 컴퓨터가 카메라 두 대를 감당하기 어려워서 한 대로 같이 해요.';
+      }
     }
   }
   if (runId !== S.runId || S.phase !== 'loading') return; // 그사이 그만두었으면 멈춤
@@ -1236,12 +1239,17 @@ function tick() {
   S.lastTick = now;
   if (!S.models) return;
 
-  // 카메라 인식: 두 대면 한 번에 한 대씩 번갈아 해서 컴퓨터 부담을 나눠요
-  const cams = S.twoCams && S.models.cam2 ? [el.camVideo, el.camVideo2] : [el.camVideo];
-  for (let c = 0; c < cams.length; c++) {
-    if (cams[c].readyState < 2 || now - S.lastCamDetect[c] < DETECT_MS) continue;
+  // 카메라 인식 (두 군데를 볼 때는 한 번에 한 군데씩 번갈아 해서 컴퓨터 부담을 나눠요)
+  // - 카메라 두 대: 0번 = 🐯 카메라, 1번 = 🐦 카메라
+  // - 카메라 한 대 + 두 명: 화면을 반으로 잘라 0번 = 🐯 쪽, 1번 = 🐦 쪽
+  const split = isDuo() && !S.twoCams && !!S.models.cam2;
+  const spots = S.twoCams && S.models.cam2 ? [el.camVideo, el.camVideo2] : split ? [el.camVideo, el.camVideo] : [el.camVideo];
+  for (let c = 0; c < spots.length; c++) {
+    if (spots[c].readyState < 2 || now - S.lastCamDetect[c] < DETECT_MS) continue;
     S.lastCamDetect[c] = now;
-    onCameraPoses(c, detectPoses(c === 0 ? S.models.cam : S.models.cam2, cams[c], now), now);
+    const model = c === 0 ? S.models.cam : S.models.cam2;
+    if (split) onHalfPoses(c, detectPoses(model, cropHalf(c), now), now);
+    else onCameraPoses(c, detectPoses(model, spots[c], now), now);
     break;
   }
   // 댄서를 볼 화면: 내 영상이면 영상 그 자체, 유튜브면 화면 공유로 받은 영상
@@ -1252,6 +1260,34 @@ function tick() {
   }
   if (S.phase === 'ready' && S.readyStep === 'body') updateReady(dt);
   if (S.phase === 'playing') updatePlaying(dt);
+}
+
+/* ---------- 카메라 한 대로 두 명: 화면을 반으로 잘라 각자 한 명씩 찾기 ----------
+   인식 프로그램은 한 화면에서 여러 명을 찾으면 한 사람에게 쏠려요(시험해 보니 둘 다 찾은 비율 49%).
+   가운데 점선을 기준으로 반씩 잘라 각자 한 명만 찾게 하면 훨씬 잘 찾아요(93%).
+   카메라 화면은 거울처럼 보여서 🐯(화면 왼쪽) = 원래 영상의 오른쪽 절반, 🐦(화면 오른쪽) = 왼쪽 절반이에요. */
+const HALF_OFFSET = [0.5, 0];   // 반쪽이 원래 영상에서 시작하는 가로 위치 (0번 🐯, 1번 🐦)
+const halfCanvases = [];
+
+function cropHalf(c) {
+  const v = el.camVideo;
+  const w = v.videoWidth, h = v.videoHeight, hw = Math.round(w / 2);
+  const cv = halfCanvases[c] || (halfCanvases[c] = document.createElement('canvas'));
+  if (cv.width !== hw || cv.height !== h) { cv.width = hw; cv.height = h; }
+  cv.getContext('2d').drawImage(v, Math.round(HALF_OFFSET[c] * w), 0, hw, h, 0, 0, hw, h);
+  return cv;
+}
+
+// 반쪽 화면(c번)에서 찾은 사람 → 전체 화면 좌표로 바꿔서 그 팀 아이로 써요
+function onHalfPoses(c, list, now) {
+  const half = closestPose(list);
+  const lm = half ? half.map((p) => ({ ...p, x: HALF_OFFSET[c] + p.x * 0.5 })) : null;
+  const P = S.players[c];
+  P.lm = lm;
+  // 두 아이 뼈대를 한 화면에 함께 그려요 (가운데 점선 포함)
+  drawSkeletons(el.camCanvas, el.camVideo, S.players.map((Q, i) => ({ lm: Q.lm, color: TEAMS[i].color })), true);
+  if (S.phase !== 'playing' || !media.advancing()) return;
+  scoreChildFrame(P, lm, now, media.time(), el.camVideo);
 }
 
 // 카메라(c번)에서 찾은 사람들이 들어왔을 때
