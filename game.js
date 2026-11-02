@@ -46,17 +46,32 @@ const ICONS = {
       <path d="M0 58 Q12 50 24 58 T48 58 T72 58 T96 58 V96 H0Z" fill="#1e88e5"/>
       <path d="M0 72 Q12 64 24 72 T48 72 T72 72 T96 72 V96 H0Z" fill="#4fc3f7"/>
     </svg>`,
+  // 경주 첨성대: 별을 보던 돌탑 + 밤하늘
+  gyeongju: `<svg viewBox="0 0 96 96" aria-hidden="true">
+      <circle cx="78" cy="16" r="8" fill="#fff6c2"/>
+      <circle cx="14" cy="14" r="1.6" fill="#fff"/><circle cx="26" cy="28" r="1.3" fill="#fff"/>
+      <circle cx="66" cy="38" r="1.4" fill="#fff"/><circle cx="84" cy="44" r="1.2" fill="#fff"/><circle cx="10" cy="44" r="1.2" fill="#fff"/>
+      <rect x="0" y="84" width="96" height="12" fill="#3d6b4a"/>
+      <rect x="29" y="77" width="38" height="7" rx="1" fill="#c9b79c"/>
+      <path d="M34 77 Q38 52 41 31 H55 Q58 52 62 77Z" fill="#e2d3b3"/>
+      <path d="M35.5 69 H60.5 M37 60 H59 M38.5 51 H57.5 M40 42 H56" stroke="#b8a584" stroke-width="1.5"/>
+      <rect x="44.5" y="47" width="7" height="8" fill="#5a4a3a"/>
+      <rect x="37" y="24" width="22" height="7" fill="#c9b79c"/>
+      <rect x="41.5" y="25.8" width="13" height="3.4" fill="#5a4a3a"/>
+    </svg>`,
 };
 
 // ---------- 2. 노래 목록 (곡을 바꾸거나 늘리려면 여기를 고치세요) ----------
 // youtube: 처음에 연결해 둔 유튜브 영상 (선생님이 노래 카드의 [주소 바꾸기]로 바꿀 수 있어요)
 // fixedFile: 게임 폴더의 videos 폴더에 있는 영상으로 고정 (예: videos/soda-pop.mp4)
-//   (소다팝·골든은 저스트댄스 팬 영상이 다른 사이트 재생을 막아 둬서, 컴퓨터에 있는 영상을 쓰기로 했어요)
+//   (케데헌 노래는 저스트댄스 팬 영상이 다른 사이트 재생을 막아 둬서, 기기에 있는 영상을 쓰기로 했어요)
 const SONGS = [
   { id: 'soda-pop',    title: '소다팝',   en: 'Soda Pop',    artist: '케이팝 데몬 헌터스', stage: '서울 남산 무대', icon: ICONS.seoul,  bg: 'linear-gradient(160deg, #3b2a8f 0%, #ff5fa2 100%)',
     fixedFile: 'videos/soda-pop' },
   { id: 'golden',      title: '골든',     en: 'Golden',      artist: '케이팝 데몬 헌터스', stage: '경복궁 무대',    icon: ICONS.palace, bg: 'linear-gradient(160deg, #ffcf3f 0%, #ff8a3d 100%)',
     fixedFile: 'videos/golden' },
+  { id: 'how-its-done', title: '하우 잇츠 던', en: "How It's Done", artist: '케이팝 데몬 헌터스', stage: '경주 첨성대 무대', icon: ICONS.gyeongju, bg: 'linear-gradient(160deg, #141a46 0%, #5b3a9c 100%)',
+    fixedFile: 'videos/how-its-done' },
   { id: 'its-me',      title: '잇츠미',   en: "IT'S ME",     artist: '아일릿',             stage: '제주도 무대',    icon: ICONS.jeju,   bg: 'linear-gradient(160deg, #9be15d 0%, #00b894 100%)',
     youtube: { id: 'xYQiE4SZ1F0', label: '저스트댄스 팬메이드 · EvmeJD' } },
   { id: 'catch-catch', title: '캐치캐치', en: 'Catch Catch', artist: '최예나',             stage: '부산 바다 무대', icon: ICONS.busan,  bg: 'linear-gradient(160deg, #4facfe 0%, #00c6e0 100%)',
@@ -298,7 +313,7 @@ function renderSongs() {
         <div class="song-title">${song.title}</div>
         <div class="song-artist">${song.en} · ${song.artist}</div>
         ${src === 'fixed'
-          ? '<div class="source-fixed">📁 이 기기에 있는 영상으로 고정</div>'
+          ? '<div class="source-fixed" title="이 기기에 있는 영상으로 고정">📁 기기 영상으로 고정</div>'
           : `<div class="source-tabs">
               <button data-src="youtube" class="${src === 'youtube' ? 'active' : ''}">▶ 유튜브</button>
               <button data-src="file" class="${src === 'file' ? 'active' : ''}">🎬 내 영상</button>

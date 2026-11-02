@@ -138,7 +138,7 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 400; margin: 0; }
 
 .song-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); /* 노래 5곡이 한 줄에 들어가게 */
   gap: 20px;
 }
 .song-card {
@@ -164,7 +164,7 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 400; margin: 0; }
   font-size: .95rem;
 }
 .song-card .body { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px 16px; flex: 1; }
-.song-title { font-family: var(--font-title); font-size: 2rem; line-height: 1.1; }
+.song-title { font-family: var(--font-title); font-size: clamp(1.5rem, 2.2vw, 2rem); line-height: 1.1; }
 .song-artist { color: var(--ink-soft); font-size: .95rem; }
 .status { font-size: .95rem; margin-top: 4px; }
 .status.ok { color: var(--green); }
