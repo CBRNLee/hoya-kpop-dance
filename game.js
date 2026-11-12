@@ -107,6 +107,9 @@ const VISION_VER = '0.10.14';
 const VISION_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION_VER}/vision_bundle.mjs`;
 const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION_VER}/wasm`;
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+// 영상 속 댄서는 더 정확한 full 모델로 봐요 (시험해 보니 동작을 바르게 읽은 장면 94.7% → 96.6~97.1%)
+const MODEL_URL_DANCER = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task';
+const DANCER_CROP = 0.4;    // 영상에서 먼저 볼 가운데 부분 (가로 40%)
 const YT_API_URL = 'https://www.youtube.com/iframe_api';
 const VIDEO_EXTS = ['mp4', 'webm', 'mov', 'm4v']; // videos 폴더에서 찾아볼 영상 종류
 
@@ -174,6 +177,8 @@ const S = {
   winStart: 0,
   dancerWin: null,        // 이번 판정 구간 동안 댄서가 움직인 양
   dancerHist: [], prevDancer: null,
+  dancerPending: null,    // 튐 고치기: 다음 장면을 기다리는 댄서 자세
+  dancerPrevRaw: null,    // 튐 고치기: 바로 전 장면의 (고치기 전) 댄서 자세
   readyTime: 0,
   stallTime: 0, debugDancer: '',
   directPlay: false,      // 자동 재생이 막혀서 [계속하기]를 누르는 순간 틀어야 할 때
@@ -426,8 +431,8 @@ function ensureModels() {
     S.modelPromise = (async () => {
       const vision = await import(VISION_URL);
       const fileset = await vision.FilesetResolver.forVisionTasks(WASM_URL);
-      const make = (delegate, numPoses) => vision.PoseLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: MODEL_URL, delegate },
+      const make = (delegate, numPoses, model = MODEL_URL) => vision.PoseLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: model, delegate },
         runningMode: 'VIDEO',
         numPoses,
         minPoseDetectionConfidence: 0.5,
@@ -435,20 +440,30 @@ function ensureModels() {
         minTrackingConfidence: 0.5,
       });
       // 카메라용·영상용 인식기를 따로 만들어요 (서로 섞이지 않게)
-      // 카메라는 아이를 최대 2명까지 찾고, 영상은 댄서 1명만 찾아요
-      let cam = null, vid = null, delegate = 'GPU';
+      // - cam: 카메라 속 아이 (가벼운 lite, 최대 2명)
+      // - vidCrop: 영상 가운데 부분에서 댄서 1명 (full)
+      // - vid / vidLite: 가운데에 없을 때 영상 전체에서 여러 명을 찾아 가운데 사람 고르기 (full → lite 보충)
+      const makeAll = async (delegate) => {
+        const made = [];
+        try {
+          for (const [n, model] of [[2, MODEL_URL], [1, MODEL_URL_DANCER], [3, MODEL_URL_DANCER], [3, MODEL_URL]]) made.push(await make(delegate, n, model));
+          return made;
+        } catch (e) {
+          made.forEach((m) => m.close());
+          throw e;
+        }
+      };
+      let delegate = 'GPU', made;
       try {
-        cam = await make('GPU', 2);
-        vid = await make('GPU', 1);
+        made = await makeAll('GPU');
       } catch (e) {
         console.warn('GPU로 실행할 수 없어 CPU로 바꿔요', e);
-        if (cam) cam.close();
         delegate = 'CPU';
-        cam = await make('CPU', 2);
-        vid = await make('CPU', 1);
+        made = await makeAll('CPU');
       }
-      // cam2: 카메라 두 대일 때만 필요해서 나중에 만들어요 (ensureCam2Model)
-      S.models = { cam, vid, cam2: null, makeCam: () => make(delegate, 2) };
+      const [cam, vidCrop, vid, vidLite] = made;
+      // cam2: 두 명일 때만 필요해서 나중에 만들어요 (ensureCam2Model)
+      S.models = { cam, vidCrop, vid, vidLite, cam2: null, makeCam: () => make(delegate, 2) };
     })().catch((e) => {
       S.modelPromise = null;
       console.error(e);
@@ -1027,6 +1042,7 @@ function resetGame() {
   Object.assign(S, {
     winStart: 0,
     dancerHist: [], prevDancer: null,
+    dancerPending: null, dancerPrevRaw: null,
     readyTime: 0,
     stallTime: 0,
   });
@@ -1177,6 +1193,8 @@ function pauseGame(direct = false) {
   media.pause();
   S.players.forEach((P) => { P.prevChild = null; });
   S.prevDancer = null;
+  S.dancerPending = null;   // 멈췄다 다시 틀면 장면이 이어지지 않으니 새로 시작해요
+  S.dancerPrevRaw = null;
   showPause(direct);
 }
 
@@ -1271,7 +1289,7 @@ function tick() {
   const src = media.kind === 'file' ? el.danceVideo : S.capture ? el.captureVideo : null;
   if (src && S.phase === 'playing' && media.advancing() && src.readyState >= 2 && now - S.lastVidDetect >= DETECT_MS) {
     S.lastVidDetect = now;
-    onDancerPose(detectPoses(S.models.vid, src, now)[0] || null, media.time(), src);
+    onDancerPose(detectDancer(src, now), media.time(), src);
   }
   if (S.phase === 'ready' && S.readyStep === 'body') updateReady(dt);
   if (S.phase === 'playing') updatePlaying(dt);
@@ -1355,6 +1373,62 @@ function scoreChildFrame(P, lm, now, vt, video = el.camVideo) {
   if (best !== null) w.poseScores.push(best);
 }
 
+/* ---------- 영상 속 댄서 찾기: 가운데 사람 기준 ----------
+   잇츠미·캐치캐치처럼 여러 명이 나오면 가운데 사람을 따라 해요.
+   시험해 보니 그냥 찾으면 가운데 사람을 0% 골랐고, 아래 방법으로는 99% 골랐어요.
+   1) 영상 가운데 40%만 잘라서 한 명을 찾아요 (가장 정확하고 가운데 사람만 보여요)
+   2) 거기 없으면(댄서가 옆으로 움직였을 때) 영상 전체에서 가운데에 가장 가까운 사람을 골라요 */
+const dancerCropCanvas = document.createElement('canvas');
+
+// 사람 키 (어깨~발목, 발목이 안 보이면 어깨~엉덩이)
+const bodyHeight = (lm) => Math.abs((lm[11].y + lm[12].y) / 2 - (lm[27].y + lm[28].y) / 2)
+  || Math.abs((lm[11].y + lm[12].y) / 2 - (lm[23].y + lm[24].y) / 2);
+const centerXOf = (lm) => [11, 12, 23, 24].reduce((s, i) => s + lm[i].x, 0) / 4;
+
+// 여러 사람 중 가운데 사람 (작게 보이는 그림·아이콘은 빼요)
+function centerPose(list) {
+  if (!list.length) return null;
+  const tallest = Math.max(...list.map(bodyHeight));
+  const big = list.filter((lm) => bodyHeight(lm) >= tallest * 0.6);
+  return big.reduce((a, b) => (Math.abs(centerXOf(b) - 0.5) < Math.abs(centerXOf(a) - 0.5) ? b : a));
+}
+
+function detectDancer(src, ts) {
+  const W = src.videoWidth, H = src.videoHeight;
+  if (!W || !H) return null;
+  const x0 = Math.round(W * (0.5 - DANCER_CROP / 2)), w = Math.round(W * DANCER_CROP);
+  const cv = dancerCropCanvas;
+  if (cv.width !== w || cv.height !== H) { cv.width = w; cv.height = H; }
+  cv.getContext('2d').drawImage(src, x0, 0, w, H, 0, 0, w, H);
+  const mid = detectPoses(S.models.vidCrop, cv, ts)[0];
+  if (mid && makePose(mid, w / H).armCount >= 2) {
+    return mid.map((p) => ({ ...p, x: (x0 + p.x * w) / W })); // 전체 영상 좌표로 바꿔요
+  }
+  return centerPose(detectPoses(S.models.vid, src, ts)) || centerPose(detectPoses(S.models.vidLite, src, ts));
+}
+
+/* ---------- 튐 고치기 거름망 ----------
+   팔·다리 방향이 앞뒤 장면과 둘 다 45° 넘게 다른데 앞뒤 장면끼리는 비슷하면(30° 안),
+   그 장면만 잘못 읽은 거라 앞뒤의 가운데 방향으로 바로잡아요.
+   다음 장면을 봐야 하니 0.07초 늦게 반영되지만, 채점은 1초 늦은 것까지 봐줘서 괜찮아요. */
+function fixSpikes(prev, cur, next) {
+  return cur.map((c, s) => {
+    const a = prev[s], b = next[s];
+    if (!a || !c || !b) return c;
+    if (angleDeg(a, c) > 45 && angleDeg(c, b) > 45 && angleDeg(a, b) < 30) {
+      const x = a.x + b.x, y = a.y + b.y, len = Math.hypot(x, y) || 1;
+      return { x: x / len, y: y / len };
+    }
+    return c;
+  });
+}
+
+// 확정된 댄서 자세를 채점용 기록에 넣어요
+function pushDancerHist(t, segs) {
+  S.dancerHist.push({ t, segs });
+  while (S.dancerHist.length && S.dancerHist[0].t < t - 2) S.dancerHist.shift();
+}
+
 // 댄스 영상 속 댄서의 자세가 들어왔을 때
 function onDancerPose(lm, vt, src) {
   if (S.settings.debug) {
@@ -1363,10 +1437,22 @@ function onDancerPose(lm, vt, src) {
     $('debug-badge').textContent = S.debugDancer;
   }
   const pose = lm ? makePose(lm, src.videoWidth / src.videoHeight) : null;
-  if (!pose || pose.armCount < 2) { S.prevDancer = null; return; }
+  if (!pose || pose.armCount < 2) {
+    // 댄서가 안 보이면 기다리던 장면은 그대로 확정해요
+    if (S.dancerPending) pushDancerHist(S.dancerPending.t, S.dancerPending.segs);
+    S.dancerPending = null;
+    S.dancerPrevRaw = null;
+    S.prevDancer = null;
+    return;
+  }
 
-  S.dancerHist.push({ t: vt, segs: pose.raw });
-  while (S.dancerHist.length && S.dancerHist[0].t < vt - 2) S.dancerHist.shift();
+  // 바로 전 장면을 앞뒤 장면과 비교해 바로잡은 뒤 확정하고, 이번 장면은 다음 장면을 기다려요
+  const p = S.dancerPending;
+  if (p) {
+    pushDancerHist(p.t, S.dancerPrevRaw ? fixSpikes(S.dancerPrevRaw, p.segs, pose.raw) : p.segs);
+    S.dancerPrevRaw = p.segs;
+  }
+  S.dancerPending = { t: vt, segs: pose.raw };
 
   if (S.prevDancer) {
     const sp = moveSpeed(S.prevDancer.pose, pose, vt - S.prevDancer.t);
